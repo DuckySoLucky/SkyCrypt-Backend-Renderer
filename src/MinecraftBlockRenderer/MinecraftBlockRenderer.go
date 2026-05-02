@@ -1,0 +1,532 @@
+package minecraftblockrenderer
+
+import (
+	nbt "duckysolucky/gorenderer/src/NBT"
+	texturepacks "duckysolucky/gorenderer/src/TexturePacks"
+	"duckysolucky/gorenderer/src/data"
+	"fmt"
+	"image"
+	"image/color"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+)
+
+// ColorMap maps common color names to RGB values (case-insensitive keys expected).
+var ColorMap = map[string]color.NRGBA{
+	"white":      {R: 249, G: 255, B: 254, A: 255},
+	"orange":     {R: 249, G: 128, B: 29, A: 255},
+	"magenta":    {R: 199, G: 78, B: 189, A: 255},
+	"light_blue": {R: 58, G: 179, B: 218, A: 255},
+	"yellow":     {R: 254, G: 216, B: 61, A: 255},
+	"lime":       {R: 128, G: 199, B: 31, A: 255},
+	"pink":       {R: 243, G: 139, B: 170, A: 255},
+	"gray":       {R: 71, G: 79, B: 82, A: 255},
+	"light_gray": {R: 157, G: 157, B: 151, A: 255},
+	"cyan":       {R: 22, G: 156, B: 156, A: 255},
+	"purple":     {R: 137, G: 50, B: 184, A: 255},
+	"blue":       {R: 60, G: 68, B: 170, A: 255},
+	"brown":      {R: 131, G: 84, B: 50, A: 255},
+	"green":      {R: 94, G: 124, B: 22, A: 255},
+	"red":        {R: 176, G: 46, B: 38, A: 255},
+	"black":      {R: 29, G: 29, B: 33, A: 255},
+}
+
+var (
+	biomeTintOnce   sync.Once
+	biomeTintConfig *data.BiomeTintConfiguration
+)
+
+var BiomeTints *data.BiomeTintConfiguration
+
+func init() {
+	biomeTintOnce.Do(func() {
+		biomeTintConfig = data.LoadDefault()
+		BiomeTints = biomeTintConfig
+	})
+}
+
+const (
+	ConstantTintStrength = 1.45
+	ColorTintBlend       = 0.82
+)
+
+type BiomeTintKind int
+
+const (
+	BiomeTintKindGrass BiomeTintKind = iota
+	BiomeTintKindFoliage
+	BiomeTintKindDryFoliage
+)
+
+// DefaultBiomeTintCoordinates maps BiomeTintKind to (Temperature, Downfall).
+var DefaultBiomeTintCoordinates = map[BiomeTintKind]struct{ Temperature, Downfall float64 }{
+	BiomeTintKindGrass:      {0.5, 1.0},
+	BiomeTintKindFoliage:    {0.5, 1.0},
+	BiomeTintKindDryFoliage: {0.5, 0.25},
+}
+
+type SkullResolverContext struct {
+	ItemId       string
+	ItemData     *data.ItemRenderData
+	CustomDataId *string
+	Profile      *nbt.NbtCompound
+	CustomData   *nbt.NbtCompound
+}
+
+type MinecraftBlockRenderer struct {
+	_modelResolver            *data.BlockModelResolver
+	_textureRepository        *data.TextureRepository
+	_blockRegistry            *data.BlockRegistry
+	_itemRegistry             *data.ItemRegistry
+	_packContext              RenderPackContext
+	_assetsDirectory          string
+	_playerSkinCacheDirectory string
+	_baseOverlayRoots         []OverlayRoot
+	_packRegistry             *texturepacks.TexturePackRegistry
+	_packRendererCache        map[string]MinecraftBlockRenderer
+	_biomeTintedTextureCache  map[string]image.RGBA
+	_playerSkinCache          map[string]*image.RGBA
+}
+
+func (renderer *MinecraftBlockRenderer) GetLayerTint(context SkullResolverContext, layerIndex int) (tintColor int, hasTint bool) {
+	if context.ItemData != nil && context.ItemData.GetLayerTint != nil {
+		return context.ItemData.GetLayerTint(layerIndex)
+	}
+
+	return 0, false
+}
+
+func (renderer *MinecraftBlockRenderer) IsDefault(context SkullResolverContext) bool {
+	if context.ItemData != nil && context.ItemData.IsDefault != nil {
+		if !context.ItemData.IsDefault() {
+			return false
+		}
+	}
+
+	return context.CustomDataId == nil &&
+		context.CustomData == nil &&
+		context.Profile == nil
+}
+
+type BlockRenderOptions struct {
+	Size                  int
+	YawInDegrees          float64
+	PitchInDegrees        float64
+	RollInDegrees         float64
+	PerspectiveAmount     float64
+	UseGuiTransform       bool
+	Padding               float64
+	AdditionalScale       float64
+	AdditionalTranslation data.Vector3
+	OverrideGuiTransform  *data.TransformDefinition
+	PackIds               []string
+	ItemData              *data.ItemRenderData
+	SkullTextureResolver  func(context SkullResolverContext) *string
+	EnableAntiAliasing    bool
+}
+
+func DefaultBlockRenderOptions() BlockRenderOptions {
+	return BlockRenderOptions{
+		Size:               512,
+		YawInDegrees:       0,
+		PitchInDegrees:     0,
+		RollInDegrees:      0,
+		PerspectiveAmount:  0,
+		UseGuiTransform:    true,
+		Padding:            0.12,
+		AdditionalScale:    1,
+		EnableAntiAliasing: true,
+	}
+}
+
+func CreateFromMinecraftAssets(
+	assetsDirectory string,
+	texturePackRegistry *texturepacks.TexturePackRegistry,
+	defaultPackIds []string) *MinecraftBlockRenderer {
+	if assetsDirectory == "" {
+		panic("assetsDirectory cannot be null or whitespace")
+	}
+
+	overlayRoots := DiscoverOverlayRoots(assetsDirectory)
+	var defaultPackStack *texturepacks.TexturePackStack
+	if texturePackRegistry != nil && len(defaultPackIds) > 0 {
+		defaultPackStack = texturePackRegistry.BuildPackStack(defaultPackIds)
+	}
+
+	var packContext = RenderPackContextCreate(&assetsDirectory, overlayRoots, defaultPackStack)
+	overlayPaths := make([]string, 0)
+	for _, root := range packContext.OverlayRoots {
+		found := false
+		for _, path := range overlayPaths {
+			if path == root.Path {
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			overlayPaths = append(overlayPaths, root.Path)
+		}
+	}
+
+	var modelResolver = data.BlockModelResolverInstance.LoadFromMinecraftAssets(assetsDirectory, &overlayPaths, &packContext.AssetNamespaces)
+	var blockRegistry = data.BlockRegistryInstance.LoadFromMinecraftAssets(assetsDirectory, modelResolver.Definitions, overlayPaths, &packContext.AssetNamespaces)
+	var itemRegistry = data.ItemRegistryInstance.LoadFromMinecraftAssets(assetsDirectory, modelResolver.Definitions, overlayPaths, &packContext.AssetNamespaces)
+	textureRoot := filepath.Join(assetsDirectory, "textures")
+	if _, err := os.Stat(textureRoot); os.IsNotExist(err) {
+		textureRoot = assetsDirectory
+	}
+
+	var textureRepository = data.NewTextureRepository(textureRoot, nil, overlayPaths, packContext.AssetNamespaces)
+	fmt.Printf("\n\nFUCK ME IN THE ASS\n\n")
+
+	return NewMinecraftBlockRenderer(modelResolver, textureRepository, blockRegistry, itemRegistry, assetsDirectory, overlayRoots, texturePackRegistry, *packContext)
+}
+
+func NewMinecraftBlockRenderer(BlockModelResolver *data.BlockModelResolver, TextureRepository *data.TextureRepository, BlockRegistry *data.BlockRegistry, ItemRegistry *data.ItemRegistry, AssetsDirectory string, BaseOverlayRoots []OverlayRoot, PackRegistry *texturepacks.TexturePackRegistry, PackContext RenderPackContext) *MinecraftBlockRenderer {
+	return &MinecraftBlockRenderer{
+		_modelResolver:            BlockModelResolver,
+		_textureRepository:        TextureRepository,
+		_blockRegistry:            BlockRegistry,
+		_itemRegistry:             ItemRegistry,
+		_assetsDirectory:          AssetsDirectory,
+		_playerSkinCacheDirectory: InitializePlayerSkinCacheDirectory(AssetsDirectory),
+		_baseOverlayRoots:         BaseOverlayRoots,
+		_packRegistry:             PackRegistry,
+		_packContext:              PackContext,
+	}
+}
+
+type OverlayRoot struct {
+	Path     string
+	SourceId string
+	Kind     string
+}
+
+func DiscoverOverlayRoots(assetsDirectory string) []OverlayRoot {
+	var overlays []OverlayRoot
+
+	parent := getParentDirectory(assetsDirectory)
+
+	tryAdd := func(candidate *string) {
+		if candidate == nil || *candidate == "" {
+			return
+		}
+
+		fullPath, err := filepath.Abs(*candidate)
+		if err != nil {
+			return
+		}
+
+		if !os.IsNotExist(err) {
+			return
+		}
+
+		for _, root := range overlays {
+			if root.Path == fullPath {
+				return
+			}
+		}
+
+		sourceId := "customdata_" + fmt.Sprint(len(overlays))
+		overlays = append(overlays, OverlayRoot{Path: fullPath, SourceId: sourceId, Kind: "CustomData"})
+	}
+
+	// Check for customdata next to the assembly (deployed with the library)
+	assemblyLocation, err := os.Executable()
+	if err == nil && assemblyLocation != "" {
+		assemblyDir := filepath.Dir(assemblyLocation)
+		tryAdd(&assemblyDir)
+	}
+
+	// Check parent directory of assets for customdata
+	if parent != nil {
+		tryAdd(parent)
+	}
+
+	// Check inside assets directory for customdata
+	tryAdd(&assetsDirectory)
+
+	return overlays
+}
+
+func getParentDirectory(path string) *string {
+	if path == "" {
+		return nil
+	}
+
+	parent := filepath.Dir(path)
+	if parent == "." || parent == "/" {
+		return nil
+	}
+
+	return &parent
+}
+
+func InitializePlayerSkinCacheDirectory(assetsDirectory string) string {
+	candidate := filepath.Join("cache", "player_skins")
+	err := os.MkdirAll(candidate, os.ModePerm)
+	if err != nil {
+		panic("Unable to initialize player skin cache directory: " + err.Error())
+	}
+
+	return candidate
+}
+
+func (renderer *MinecraftBlockRenderer) NormalizeResourceKey(identifier *string) string {
+	if identifier == nil || *identifier == "" {
+		return ""
+	}
+	normalized := *identifier
+	normalized = filepath.ToSlash(normalized)
+	if strings.HasPrefix(normalized, "#") {
+		return ""
+	}
+
+	stateSeperator := strings.Index(normalized, "[")
+	if stateSeperator >= 0 {
+		normalized = normalized[:stateSeperator]
+	}
+
+	colonIndex := strings.Index(normalized, ":")
+	if colonIndex >= 0 {
+		normalized = normalized[colonIndex+1:]
+	}
+
+	normalized = strings.TrimLeft(normalized, "/")
+	if strings.HasPrefix(strings.ToLower(normalized), "textures/") {
+		normalized = normalized[9:]
+	}
+
+	if strings.HasPrefix(strings.ToLower(normalized), "models/") {
+		normalized = normalized[7:]
+	}
+
+	if strings.HasPrefix(strings.ToLower(normalized), "block/") {
+		normalized = normalized[6:]
+	} else if strings.HasPrefix(strings.ToLower(normalized), "blocks/") {
+		normalized = normalized[7:]
+	} else if strings.HasPrefix(strings.ToLower(normalized), "item/") {
+		normalized = normalized[5:]
+	} else if strings.HasPrefix(strings.ToLower(normalized), "items/") {
+		normalized = normalized[6:]
+	}
+
+	normalized = strings.Trim(normalized, "/")
+	slashIndex := strings.LastIndex(normalized, "/")
+	if slashIndex >= 0 {
+		normalized = normalized[slashIndex+1:]
+	}
+
+	return strings.ToLower(normalized)
+}
+
+func (renderer *MinecraftBlockRenderer) TryGetConstantTint(textureId string, blockName *string) *color.RGBA {
+	textureKey := renderer.NormalizeResourceKey(&textureId)
+	constantColors := BiomeTints.ConstantColors
+	if color, found := constantColors[textureKey]; found {
+		return &color
+	}
+
+	if blockName != nil {
+		blockKey := renderer.NormalizeResourceKey(blockName)
+		if color, found := constantColors[blockKey]; found {
+			return &color
+		}
+	}
+
+	return nil
+}
+
+func (renderer *MinecraftBlockRenderer) TryGetBiomeTintKind(textureId string, blockName string) *BiomeTintKind {
+	textureKey := renderer.NormalizeResourceKey(&textureId)
+	blockKey := renderer.NormalizeResourceKey(&blockName)
+	isItemTexture := renderer.IsLikelyItemTexture(textureId)
+
+	config := BiomeTints
+
+	if isItemTexture {
+		if _, found := config.ItemTintExclusions[textureKey]; found {
+			return nil
+		}
+		if blockKey != "" {
+			if _, found := config.ItemTintExclusions[blockKey]; found {
+				return nil
+			}
+		}
+	}
+
+	if _, found := config.DryFoliageTextures[textureKey]; found {
+		result := BiomeTintKindDryFoliage
+		return &result
+	}
+
+	if blockKey != "" {
+		if _, found := config.DryFoliageBlocks[blockKey]; found {
+			result := BiomeTintKindDryFoliage
+			return &result
+		}
+	}
+
+	if _, found := config.GrassTextures[textureKey]; found {
+		result := BiomeTintKindGrass
+		return &result
+	}
+	if blockKey != "" {
+		if _, found := config.GrassBlocks[blockKey]; found {
+			result := BiomeTintKindGrass
+			return &result
+		}
+	}
+
+	if _, found := config.FoliageTextures[textureKey]; found {
+		result := BiomeTintKindFoliage
+		return &result
+	}
+	if blockKey != "" {
+		if _, found := config.FoliageBlocks[blockKey]; found {
+			result := BiomeTintKindFoliage
+			return &result
+		}
+	}
+
+	return nil
+}
+
+func (renderer *MinecraftBlockRenderer) IsLikelyItemTexture(identifier string) bool {
+	if identifier == "" {
+		return false
+	}
+
+	normalized := strings.ReplaceAll(identifier, "\\", "/")
+	if strings.HasPrefix(strings.ToLower(normalized), "item/") ||
+		strings.HasPrefix(strings.ToLower(normalized), "items/") {
+		return true
+	}
+
+	if strings.HasPrefix(strings.ToLower(normalized), "textures/item/") {
+		return true
+	}
+
+	lowerNormalized := strings.ToLower(normalized)
+	return strings.Contains(lowerNormalized, "/item/") ||
+		strings.Contains(lowerNormalized, ":item/") ||
+		strings.Contains(lowerNormalized, "/items/") ||
+		strings.Contains(lowerNormalized, ":items/")
+}
+
+func (renderer *MinecraftBlockRenderer) GetBiomeTintedTexture(textureId string, kind BiomeTintKind) *image.RGBA {
+	cacheKey := fmt.Sprintf("%s|%d", renderer.NormalizeResourceKey(&textureId), kind)
+	if cached, found := renderer._biomeTintedTextureCache[cacheKey]; found {
+		return &cached
+	}
+
+	var colormap *image.RGBA
+	switch kind {
+	case BiomeTintKindGrass:
+		colormap = renderer._textureRepository.GrassColorMap
+	case BiomeTintKindFoliage:
+		colormap = renderer._textureRepository.FoliageColorMap
+	case BiomeTintKindDryFoliage:
+		colormap = renderer._textureRepository.DryFoliageColorMap
+	default:
+		return renderer._textureRepository.GetTexture(textureId)
+	}
+
+	if colormap == nil {
+		return renderer._textureRepository.GetTexture(textureId)
+	}
+
+	tintColor := SampleBiomeTintColor(colormap, kind)
+	tinted := ApplyBiomeTint(renderer._textureRepository.GetTexture(textureId), tintColor)
+	renderer._biomeTintedTextureCache[cacheKey] = *tinted
+
+	return tinted
+}
+
+func SampleBiomeTintColor(colormap *image.RGBA, kind BiomeTintKind) color.RGBA {
+	coordinates, found := DefaultBiomeTintCoordinates[kind]
+	if !found {
+		coordinates = struct{ Temperature, Downfall float64 }{0.5, 1.0}
+	}
+
+	temperature := clampFloat64(coordinates.Temperature, 0, 1)
+	downfall := clampFloat64(coordinates.Downfall, 0, 1)
+	rainfall := clampFloat64(downfall*temperature, 0, 1)
+
+	x := int(clampFloat64(float64(colormap.Bounds().Dx()-1)*(1-temperature), 0, float64(colormap.Bounds().Dx()-1)))
+	y := int(clampFloat64(float64(colormap.Bounds().Dy()-1)*(1-rainfall), 0, float64(colormap.Bounds().Dy()-1)))
+
+	return colormap.At(x, y).(color.RGBA)
+}
+
+func clampFloat64(v, low, high float64) float64 {
+	if v < low {
+		return low
+	}
+	if v > high {
+		return high
+	}
+	return v
+}
+
+func ApplyBiomeTint(baseTexture *image.RGBA, tintColor color.RGBA) *image.RGBA {
+	bounds := baseTexture.Bounds()
+	tinted := image.NewRGBA(bounds)
+
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			originalPixel := baseTexture.At(x, y).(color.RGBA)
+			if originalPixel.A == 0 {
+				tinted.Set(x, y, originalPixel)
+				continue
+			}
+
+			r := uint8(float64(originalPixel.R) * float64(tintColor.R) / 255)
+			g := uint8(float64(originalPixel.G) * float64(tintColor.G) / 255)
+			b := uint8(float64(originalPixel.B) * float64(tintColor.B) / 255)
+			a := originalPixel.A
+
+			tinted.Set(x, y, color.RGBA{R: r, G: g, B: b, A: a})
+		}
+	}
+
+	return tinted
+}
+
+func (renderer *MinecraftBlockRenderer) RenderBlock(blockName string, options BlockRenderOptions) *image.RGBA {
+	if blockName == "" {
+		return nil
+	}
+
+	effectiveOptions := options
+	rendererForOptions, forwardedOptions := renderer.ResolveRendererForOptions(effectiveOptions)
+	return rendererForOptions.RenderBlockInternal(blockName, forwardedOptions)
+}
+
+func (renderer *MinecraftBlockRenderer) RenderBlockInternal(blockName string, options BlockRenderOptions) *image.RGBA {
+	modelName := blockName
+	if mappedModel, found := renderer._blockRegistry.TryGetModel(blockName); found && mappedModel != "" {
+		modelName = mappedModel
+	}
+
+	model := renderer._modelResolver.Resolve(modelName)
+	return renderer.RenderModel(model, options, &blockName)
+}
+
+func (renderer *MinecraftBlockRenderer) RenderItem(itemName string, itemData *data.ItemRenderData, options *BlockRenderOptions) *image.RGBA {
+	if itemData == nil {
+		return nil
+	}
+
+	effectiveOptions := DefaultBlockRenderOptions()
+	if options != nil {
+		effectiveOptions = *options
+	}
+	effectiveOptions.ItemData = itemData
+
+	rendererForOptions, forwardedOptions := renderer.ResolveRendererForOptions(effectiveOptions)
+	return rendererForOptions.RenderGuiItemInternal(itemName, &forwardedOptions, nil)
+}
