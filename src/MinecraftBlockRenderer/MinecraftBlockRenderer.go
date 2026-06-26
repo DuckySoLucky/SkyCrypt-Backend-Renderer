@@ -76,18 +76,23 @@ type SkullResolverContext struct {
 }
 
 type MinecraftBlockRenderer struct {
-	_modelResolver            *data.BlockModelResolver
-	_textureRepository        *data.TextureRepository
-	_blockRegistry            *data.BlockRegistry
-	_itemRegistry             *data.ItemRegistry
-	_packContext              RenderPackContext
-	_assetsDirectory          string
-	_playerSkinCacheDirectory string
-	_baseOverlayRoots         []OverlayRoot
-	_packRegistry             *texturepacks.TexturePackRegistry
-	_packRendererCache        map[string]MinecraftBlockRenderer
-	_biomeTintedTextureCache  map[string]image.RGBA
-	_playerSkinCache          map[string]*image.RGBA
+	_modelResolver             *data.BlockModelResolver
+	_textureRepository         *data.TextureRepository
+	_blockRegistry             *data.BlockRegistry
+	_itemRegistry              *data.ItemRegistry
+	_packContext               RenderPackContext
+	_assetsDirectory           string
+	_playerSkinCacheDirectory  string
+	_baseOverlayRoots          []OverlayRoot
+	_packRegistry              *texturepacks.TexturePackRegistry
+	_packRendererCache         map[string]*MinecraftBlockRenderer
+	_packRendererCacheMu       sync.Mutex
+	_biomeTintedTextureCache   map[string]image.RGBA
+	_biomeTintedTextureMu      sync.RWMutex
+	_playerSkinCache           map[string]*image.RGBA
+	_playerSkinCacheMu         sync.RWMutex
+	_skyblockItemDefinitions   map[string]skyblockItemDefinitionCacheEntry
+	_skyblockItemDefinitionsMu sync.RWMutex
 }
 
 type ItemRenderData = data.ItemRenderData
@@ -173,9 +178,9 @@ func CreateFromMinecraftAssets(
 		}
 	}
 
-	var modelResolver = data.BlockModelResolverInstance.LoadFromMinecraftAssets(assetsDirectory, &overlayPaths, &packContext.AssetNamespaces)
-	var blockRegistry = data.BlockRegistryInstance.LoadFromMinecraftAssets(assetsDirectory, modelResolver.Definitions, overlayPaths, &packContext.AssetNamespaces)
-	var itemRegistry = data.ItemRegistryInstance.LoadFromMinecraftAssets(assetsDirectory, modelResolver.Definitions, overlayPaths, &packContext.AssetNamespaces)
+	var modelResolver = data.NewBlockModelResolver(make(map[string]data.BlockModelDefinition)).LoadFromMinecraftAssets(assetsDirectory, &overlayPaths, &packContext.AssetNamespaces)
+	var blockRegistry = data.NewBlockRegistry().LoadFromMinecraftAssets(assetsDirectory, modelResolver.Definitions, overlayPaths, &packContext.AssetNamespaces)
+	var itemRegistry = data.NewItemRegistry().LoadFromMinecraftAssets(assetsDirectory, modelResolver.Definitions, overlayPaths, &packContext.AssetNamespaces)
 	textureRoot := filepath.Join(assetsDirectory, "textures")
 	if _, err := os.Stat(textureRoot); os.IsNotExist(err) {
 		textureRoot = assetsDirectory
@@ -199,7 +204,7 @@ func NewMinecraftBlockRenderer(BlockModelResolver *data.BlockModelResolver, Text
 		_baseOverlayRoots:         BaseOverlayRoots,
 		_packRegistry:             PackRegistry,
 		_packContext:              PackContext,
-		_packRendererCache:        make(map[string]MinecraftBlockRenderer),
+		_packRendererCache:        make(map[string]*MinecraftBlockRenderer),
 		_biomeTintedTextureCache:  make(map[string]image.RGBA),
 		_playerSkinCache:          make(map[string]*image.RGBA),
 	}
@@ -424,13 +429,22 @@ func (renderer *MinecraftBlockRenderer) IsLikelyItemTexture(identifier string) b
 }
 
 func (renderer *MinecraftBlockRenderer) GetBiomeTintedTexture(textureId string, kind BiomeTintKind) *image.RGBA {
+	cacheKey := fmt.Sprintf("%s|%d", renderer.NormalizeResourceKey(&textureId), kind)
+
+	renderer._biomeTintedTextureMu.RLock()
+	if renderer._biomeTintedTextureCache != nil {
+		if cached, found := renderer._biomeTintedTextureCache[cacheKey]; found {
+			renderer._biomeTintedTextureMu.RUnlock()
+			return &cached
+		}
+	}
+	renderer._biomeTintedTextureMu.RUnlock()
+
+	renderer._biomeTintedTextureMu.Lock()
 	if renderer._biomeTintedTextureCache == nil {
 		renderer._biomeTintedTextureCache = make(map[string]image.RGBA)
 	}
-	cacheKey := fmt.Sprintf("%s|%d", renderer.NormalizeResourceKey(&textureId), kind)
-	if cached, found := renderer._biomeTintedTextureCache[cacheKey]; found {
-		return &cached
-	}
+	renderer._biomeTintedTextureMu.Unlock()
 
 	var colormap *image.RGBA
 	switch kind {
@@ -450,7 +464,9 @@ func (renderer *MinecraftBlockRenderer) GetBiomeTintedTexture(textureId string, 
 
 	tintColor := SampleBiomeTintColor(colormap, kind)
 	tinted := ApplyBiomeTint(renderer._textureRepository.GetTexture(textureId), tintColor)
+	renderer._biomeTintedTextureMu.Lock()
 	renderer._biomeTintedTextureCache[cacheKey] = *tinted
+	renderer._biomeTintedTextureMu.Unlock()
 
 	return tinted
 }

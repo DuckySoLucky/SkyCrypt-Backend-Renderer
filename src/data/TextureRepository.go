@@ -11,19 +11,23 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 type TextureRepository struct {
 	_assetNamespaces assets.AssetNamespaceRegistry
 
 	_cache                   map[string]image.RGBA
+	_cacheMu                 sync.RWMutex
 	_missingTexture          image.RGBA
 	_activeAnimationOverride *AnimationOverride
+	_animationOverrideMu     sync.RWMutex
 	_sources                 []TextureSource
 	_trimPaletteLookup       map[int]int
 	_trimPaletteLength       int
 	_embedded                map[string]string
 	_animationCache          map[string]TextureAnimation
+	_animationCacheMu        sync.RWMutex
 
 	GrassColorMap      *image.RGBA
 	FoliageColorMap    *image.RGBA
@@ -91,20 +95,31 @@ func (_textureRepository *TextureRepository) GetTexture(textureId string) *image
 	}
 
 	normalizedTextureId := _textureRepository.NormalizeTextureId(textureId)
+	_textureRepository._animationOverrideMu.RLock()
 	overrideContext := _textureRepository._activeAnimationOverride
+	_textureRepository._animationOverrideMu.RUnlock()
 	if overrideContext != nil {
 		if overrideFrame, found := overrideContext.GetAnimationOverrideFrame(normalizedTextureId); found {
 			return &overrideFrame.Image
 		}
 	}
 
+	_textureRepository._cacheMu.RLock()
 	if texture, found := _textureRepository._cache[normalizedTextureId]; found {
+		_textureRepository._cacheMu.RUnlock()
 		return &texture
 	}
+	_textureRepository._cacheMu.RUnlock()
 
 	loadedTexture := _textureRepository.LoadTextureInternal(normalizedTextureId)
 
+	_textureRepository._cacheMu.Lock()
+	if cached, found := _textureRepository._cache[normalizedTextureId]; found {
+		_textureRepository._cacheMu.Unlock()
+		return &cached
+	}
 	_textureRepository._cache[normalizedTextureId] = loadedTexture
+	_textureRepository._cacheMu.Unlock()
 
 	// fmt.Printf("Returning image with height and width of %d and %d\n", loadedTexture.Bounds().Dy(), loadedTexture.Bounds().Dx())
 	return &loadedTexture
@@ -115,10 +130,15 @@ func (_textureRepository *TextureRepository) GetAnimation(textureId string) (*Te
 		return nil, false
 	}
 	normalizedTextureId := _textureRepository.NormalizeTextureId(textureId)
-	if _, found := _textureRepository._animationCache[normalizedTextureId]; !found {
+	_textureRepository._animationCacheMu.RLock()
+	_, found := _textureRepository._animationCache[normalizedTextureId]
+	_textureRepository._animationCacheMu.RUnlock()
+	if !found {
 		_textureRepository.GetTexture(textureId)
 	}
+	_textureRepository._animationCacheMu.RLock()
 	animation, found := _textureRepository._animationCache[normalizedTextureId]
+	_textureRepository._animationCacheMu.RUnlock()
 	if !found {
 		return nil, false
 	}
@@ -129,10 +149,14 @@ func (_textureRepository *TextureRepository) WithAnimationOverride(override *Ani
 	if _textureRepository == nil || render == nil {
 		return
 	}
+	_textureRepository._animationOverrideMu.Lock()
 	previous := _textureRepository._activeAnimationOverride
 	_textureRepository._activeAnimationOverride = override
+	_textureRepository._animationOverrideMu.Unlock()
 	defer func() {
+		_textureRepository._animationOverrideMu.Lock()
 		_textureRepository._activeAnimationOverride = previous
+		_textureRepository._animationOverrideMu.Unlock()
 	}()
 	render()
 }
@@ -666,7 +690,9 @@ func (_textureRepository *TextureRepository) ProcessAnimatedTexture(normalizedKe
 		return spriteSheet
 	}
 
+	_textureRepository._animationCacheMu.Lock()
 	_textureRepository._animationCache[normalizedKey] = *animation
+	_textureRepository._animationCacheMu.Unlock()
 	firstFrame := animation.Frames[0].Image
 	return firstFrame
 }
@@ -1017,17 +1043,25 @@ func (_textureRepository *TextureRepository) GetTintedTexture(textureId string, 
 	normalized := _textureRepository.NormalizeTextureId(textureId)
 	cacheKey := fmt.Sprintf("%s_%02X%02X%02X%02X_%.3f_%.3f", normalized, tint.R, tint.G, tint.B, tint.A, strengthMultiplier, blend)
 
-	if animationOverride := _textureRepository._activeAnimationOverride; animationOverride != nil && animationOverride.CacheKeySuffix != "" {
+	_textureRepository._animationOverrideMu.RLock()
+	animationOverride := _textureRepository._activeAnimationOverride
+	_textureRepository._animationOverrideMu.RUnlock()
+	if animationOverride != nil && animationOverride.CacheKeySuffix != "" {
 		cacheKey += "|anim:" + animationOverride.CacheKeySuffix
 	}
 
+	_textureRepository._cacheMu.RLock()
 	if cached, found := _textureRepository._cache[cacheKey]; found {
+		_textureRepository._cacheMu.RUnlock()
 		return &cached
 	}
+	_textureRepository._cacheMu.RUnlock()
 
 	original := _textureRepository.GetTexture(textureId)
 	if original == nil || sameRGBA(*original, _textureRepository._missingTexture) {
+		_textureRepository._cacheMu.Lock()
 		_textureRepository._cache[cacheKey] = _textureRepository._missingTexture
+		_textureRepository._cacheMu.Unlock()
 		return &_textureRepository._missingTexture
 	}
 
@@ -1067,7 +1101,13 @@ func (_textureRepository *TextureRepository) GetTintedTexture(textureId string, 
 		}
 	}
 
+	_textureRepository._cacheMu.Lock()
+	if cached, found := _textureRepository._cache[cacheKey]; found {
+		_textureRepository._cacheMu.Unlock()
+		return &cached
+	}
 	_textureRepository._cache[cacheKey] = *tinted
+	_textureRepository._cacheMu.Unlock()
 	return tinted
 }
 

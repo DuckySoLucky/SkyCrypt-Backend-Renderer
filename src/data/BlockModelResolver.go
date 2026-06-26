@@ -5,11 +5,13 @@ import (
 	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/assets"
 	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/global"
 	"os"
+	"sync"
 )
 
 type BlockModelResolver struct {
 	Definitions map[string]BlockModelDefinition
 	_cache      map[string]BlockModelInstance
+	_cacheMu    sync.RWMutex
 }
 
 func (resolver *BlockModelResolver) LoadFromFile(path string) error {
@@ -67,12 +69,28 @@ func (resolver *BlockModelResolver) Resolve(model string) *BlockModelInstance {
 
 	normalizedName := resolver.NormalizeName(model)
 
-	if instance, exists := resolver._cache[normalizedName]; exists {
-		return &instance
+	resolver._cacheMu.RLock()
+	if resolver._cache != nil {
+		if instance, exists := resolver._cache[normalizedName]; exists {
+			resolver._cacheMu.RUnlock()
+			return &instance
+		}
 	}
+	resolver._cacheMu.RUnlock()
 
 	instance := resolver.ResolveInternal(normalizedName, make(map[string]struct{}))
+
+	resolver._cacheMu.Lock()
+	if resolver._cache == nil {
+		resolver._cache = make(map[string]BlockModelInstance)
+	} else {
+		if cached, exists := resolver._cache[normalizedName]; exists {
+			resolver._cacheMu.Unlock()
+			return &cached
+		}
+	}
 	resolver._cache[normalizedName] = instance
+	resolver._cacheMu.Unlock()
 
 	return &instance
 }
@@ -304,6 +322,7 @@ func (resolver *BlockModelResolver) NormalizeName(name string) string {
 func NewBlockModelResolver(definitions map[string]BlockModelDefinition) *BlockModelResolver {
 	return &BlockModelResolver{
 		Definitions: definitions,
+		_cache:      make(map[string]BlockModelInstance),
 	}
 }
 

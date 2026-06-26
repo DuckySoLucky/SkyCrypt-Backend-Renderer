@@ -6,14 +6,15 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/assets"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/global"
 	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/assets"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/global"
 )
 
 type TexturePackRegistry struct {
@@ -341,8 +342,6 @@ func (texturePackRegistry *TexturePackRegistry) RegisterPackCore(directory strin
 	if _, exists := texturePackRegistry.Packs[resourceMeta.Id]; exists {
 		panic("A texture pack with id '" + resourceMeta.Id + "' has already been registered.")
 	}
-
-	fmt.Printf("Registered texture pack '%s' with id '%s', version '%s', last modified %s, size %d bytes, supports CIT: %v, pack format: %v\n", resourceMeta.Name, resourceMeta.Id, resourceMeta.Version, lastWriteTimeUtc.UTC().Format(time.RFC3339), sizeBytes, supportsCit, packFormat)
 
 	texturePackRegistry.Packs[resourceMeta.Id] = registered
 
@@ -702,7 +701,7 @@ func (texturePackRegistry *TexturePackRegistry) BuildPackStack(packIds []string)
 
 func (texturePackRegistry *TexturePackRegistry) RegisterAllPacks(rootDirectory string, searchRecursively bool) []RegisteredResourcePack {
 	results, normalizedRoot := texturePackRegistry.RegisterAllPacksCore(rootDirectory, searchRecursively)
-	if rootDirectory != "" {
+	if rootDirectory != "" && normalizedRoot != nil {
 		texturePackRegistry.RecordRegistrationSource(RegistrationSource{
 			Path:               *normalizedRoot,
 			SearchRecursively:  searchRecursively,

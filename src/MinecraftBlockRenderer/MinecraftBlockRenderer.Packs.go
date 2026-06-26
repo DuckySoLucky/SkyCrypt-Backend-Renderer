@@ -326,19 +326,22 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) GetRendererForPackStack(p
 }
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) GetRendererForPackStackWithContext(packStack *texturepacks.TexturePackStack) *MinecraftBlockRenderer {
+	_minecraftBlockRenderer._packRendererCacheMu.Lock()
+	defer _minecraftBlockRenderer._packRendererCacheMu.Unlock()
+
 	if _minecraftBlockRenderer._packRendererCache == nil {
-		_minecraftBlockRenderer._packRendererCache = make(map[string]MinecraftBlockRenderer)
+		_minecraftBlockRenderer._packRendererCache = make(map[string]*MinecraftBlockRenderer)
 	}
 
 	cacheKey := packStack.Fingerprint
 	if cached, exists := _minecraftBlockRenderer._packRendererCache[cacheKey]; exists {
-		return &cached
+		return cached
 	}
 
 	renderer := _minecraftBlockRenderer.CreatePackRenderer(packStack)
 	// fmt.Printf("cacheKey: %+v\nrendered: %+v\n", cacheKey, renderer != nil)
 
-	_minecraftBlockRenderer._packRendererCache[cacheKey] = *renderer
+	_minecraftBlockRenderer._packRendererCache[cacheKey] = renderer
 	return renderer
 }
 
@@ -350,9 +353,9 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) CreatePackRenderer(packSt
 		overlayPaths[i] = root.Path
 	}
 
-	modelResolver := data.BlockModelResolverInstance.LoadFromMinecraftAssets(_minecraftBlockRenderer._assetsDirectory, &overlayPaths, &packContext.AssetNamespaces)
-	blockRegistry := data.BlockRegistryInstance.LoadFromMinecraftAssets(_minecraftBlockRenderer._assetsDirectory, modelResolver.Definitions, overlayPaths, &packContext.AssetNamespaces)
-	itemRegistry := data.ItemRegistryInstance.LoadFromMinecraftAssets(_minecraftBlockRenderer._assetsDirectory, modelResolver.Definitions, overlayPaths, &packContext.AssetNamespaces)
+	modelResolver := data.NewBlockModelResolver(make(map[string]data.BlockModelDefinition)).LoadFromMinecraftAssets(_minecraftBlockRenderer._assetsDirectory, &overlayPaths, &packContext.AssetNamespaces)
+	blockRegistry := data.NewBlockRegistry().LoadFromMinecraftAssets(_minecraftBlockRenderer._assetsDirectory, modelResolver.Definitions, overlayPaths, &packContext.AssetNamespaces)
+	itemRegistry := data.NewItemRegistry().LoadFromMinecraftAssets(_minecraftBlockRenderer._assetsDirectory, modelResolver.Definitions, overlayPaths, &packContext.AssetNamespaces)
 	textureRoot := filepath.Join(_minecraftBlockRenderer._assetsDirectory, "textures")
 	if _, err := os.Stat(textureRoot); os.IsNotExist(err) {
 		textureRoot = _minecraftBlockRenderer._assetsDirectory

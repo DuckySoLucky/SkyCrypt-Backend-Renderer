@@ -63,6 +63,12 @@ var AnimatedDialItems = map[string]struct{}{
 	"clock":            {},
 }
 
+type skyblockItemDefinitionCacheEntry struct {
+	Loaded         bool
+	Selector       data.ItemModelSelector
+	ModelReference string
+}
+
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) ShouldAlignGuiItemToBottom(itemName string) bool {
 	if itemName == "" {
 		return false
@@ -401,7 +407,60 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) ResolveSkyblockItemModelF
 		return nil
 	}
 
+	cacheKey := strings.ToLower(encodedId)
+	entry := _minecraftBlockRenderer.getSkyblockItemDefinition(cacheKey)
+	if !entry.Loaded {
+		return nil
+	}
+
+	if entry.Selector != nil {
+		resolved := entry.Selector.Resolve(data.ItemModelContext{
+			ItemData:       itemData,
+			DisplayContext: displayContext,
+			ItemName:       itemName,
+		})
+		if resolved != nil && strings.TrimSpace(*resolved) != "" {
+			return resolved
+		}
+	}
+
+	if strings.TrimSpace(entry.ModelReference) != "" {
+		modelReference := entry.ModelReference
+		return &modelReference
+	}
+
+	return nil
+}
+
+func (_minecraftBlockRenderer *MinecraftBlockRenderer) getSkyblockItemDefinition(encodedId string) skyblockItemDefinitionCacheEntry {
+	_minecraftBlockRenderer._skyblockItemDefinitionsMu.RLock()
+	if _minecraftBlockRenderer._skyblockItemDefinitions != nil {
+		if entry, found := _minecraftBlockRenderer._skyblockItemDefinitions[encodedId]; found {
+			_minecraftBlockRenderer._skyblockItemDefinitionsMu.RUnlock()
+			return entry
+		}
+	}
+	_minecraftBlockRenderer._skyblockItemDefinitionsMu.RUnlock()
+
+	entry := _minecraftBlockRenderer.loadSkyblockItemDefinition(encodedId)
+
+	_minecraftBlockRenderer._skyblockItemDefinitionsMu.Lock()
+	if _minecraftBlockRenderer._skyblockItemDefinitions == nil {
+		_minecraftBlockRenderer._skyblockItemDefinitions = make(map[string]skyblockItemDefinitionCacheEntry)
+	}
+	if cached, found := _minecraftBlockRenderer._skyblockItemDefinitions[encodedId]; found {
+		_minecraftBlockRenderer._skyblockItemDefinitionsMu.Unlock()
+		return cached
+	}
+	_minecraftBlockRenderer._skyblockItemDefinitions[encodedId] = entry
+	_minecraftBlockRenderer._skyblockItemDefinitionsMu.Unlock()
+
+	return entry
+}
+
+func (_minecraftBlockRenderer *MinecraftBlockRenderer) loadSkyblockItemDefinition(encodedId string) skyblockItemDefinitionCacheEntry {
 	direct := "assets/skyblock/items/" + strings.ToLower(encodedId) + ".json"
+	fileName := strings.ToLower(encodedId) + ".json"
 	suffix := "/" + direct
 
 	for packIndex := len(_minecraftBlockRenderer._packContext.Packs) - 1; packIndex >= 0; packIndex-- {
@@ -410,18 +469,27 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) ResolveSkyblockItemModelF
 			continue
 		}
 
-		files, err := pack.Provider.EnumerateFiles("", "*.json", true)
-		if err != nil {
-			continue
+		candidates := []string{}
+		if pack.Provider.FileExists(direct) {
+			candidates = append(candidates, direct)
+		} else if files, err := pack.Provider.EnumerateFiles("assets/skyblock/items", fileName, true); err == nil {
+			candidates = append(candidates, files...)
 		}
-
-		for _, file := range files {
-			lower := strings.ToLower(strings.ReplaceAll(file, "\\", "/"))
-			if lower != direct && !strings.HasSuffix(lower, suffix) {
+		if len(candidates) == 0 {
+			files, err := pack.Provider.EnumerateFiles("", fileName, true)
+			if err != nil {
 				continue
 			}
+			for _, file := range files {
+				lower := strings.ToLower(strings.ReplaceAll(file, "\\", "/"))
+				if lower == fileName || lower == direct || strings.HasSuffix(lower, suffix) || strings.HasSuffix(lower, "/"+fileName) {
+					candidates = append(candidates, file)
+				}
+			}
+		}
 
-			jsonContent, err := pack.Provider.ReadAllText(file)
+		for _, candidate := range candidates {
+			jsonContent, err := pack.Provider.ReadAllText(candidate)
 			if err != nil {
 				continue
 			}
@@ -431,25 +499,21 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) ResolveSkyblockItemModelF
 				continue
 			}
 
-			if selector := data.ParseItemModelSelectorFromRoot(itemDefinition); selector != nil {
-				resolved := selector.Resolve(data.ItemModelContext{
-					ItemData:       itemData,
-					DisplayContext: displayContext,
-					ItemName:       itemName,
-				})
-				if resolved != nil && strings.TrimSpace(*resolved) != "" {
-					return resolved
-				}
+			selector := data.ParseItemModelSelectorFromRoot(itemDefinition)
+			modelReference := data.ResolveModelReferenceFromItemDefinition(itemDefinition)
+			if selector == nil && strings.TrimSpace(modelReference) == "" {
+				continue
 			}
 
-			modelReference := data.ResolveModelReferenceFromItemDefinition(itemDefinition)
-			if strings.TrimSpace(modelReference) != "" {
-				return &modelReference
+			return skyblockItemDefinitionCacheEntry{
+				Loaded:         true,
+				Selector:       selector,
+				ModelReference: modelReference,
 			}
 		}
 	}
 
-	return nil
+	return skyblockItemDefinitionCacheEntry{}
 }
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) EnumerateCandidateNames(name string) []string {
@@ -1019,22 +1083,33 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryLoadSkinFromURL(rawURL
 		return image.RGBA{}, os.ErrInvalid
 	}
 
-	if _minecraftBlockRenderer._playerSkinCache == nil {
-		_minecraftBlockRenderer._playerSkinCache = make(map[string]*image.RGBA)
+	_minecraftBlockRenderer._playerSkinCacheMu.RLock()
+	if _minecraftBlockRenderer._playerSkinCache != nil {
+		if cached, found := _minecraftBlockRenderer._playerSkinCache[normalized]; found && cached != nil {
+			cachedCopy := *cached
+			_minecraftBlockRenderer._playerSkinCacheMu.RUnlock()
+			return cachedCopy, nil
+		}
 	}
-	if cached, found := _minecraftBlockRenderer._playerSkinCache[normalized]; found && cached != nil {
-		cachedCopy := *cached
-		return cachedCopy, nil
-	}
+	_minecraftBlockRenderer._playerSkinCacheMu.RUnlock()
 
 	skin, err := _minecraftBlockRenderer.LoadOrDownloadPlayerSkin(normalized)
 	if err != nil {
-		delete(_minecraftBlockRenderer._playerSkinCache, normalized)
+		_minecraftBlockRenderer._playerSkinCacheMu.Lock()
+		if _minecraftBlockRenderer._playerSkinCache != nil {
+			delete(_minecraftBlockRenderer._playerSkinCache, normalized)
+		}
+		_minecraftBlockRenderer._playerSkinCacheMu.Unlock()
 		return image.RGBA{}, err
 	}
 
 	skinCopy := skin
+	_minecraftBlockRenderer._playerSkinCacheMu.Lock()
+	if _minecraftBlockRenderer._playerSkinCache == nil {
+		_minecraftBlockRenderer._playerSkinCache = make(map[string]*image.RGBA)
+	}
 	_minecraftBlockRenderer._playerSkinCache[normalized] = &skinCopy
+	_minecraftBlockRenderer._playerSkinCacheMu.Unlock()
 
 	return skin, nil
 }

@@ -65,6 +65,41 @@ func TestRenderSkyBlockItemIDUsesHPlusSelector(t *testing.T) {
 	}
 }
 
+func TestReloadResourcePacksClearsSkyblockItemDefinitionCache(t *testing.T) {
+	assetsRoot := requireFullAssets(t)
+	packRoot := requireTexturePack(t, "hplus")
+	registry := texturepacks.NewTexturePackRegistry()
+	if _, err := registry.RegisterPack(packRoot); err != nil {
+		t.Fatal(err)
+	}
+	renderer := CreateFromMinecraftAssets(assetsRoot, registry, []string{"hplus"})
+	itemData := &data.ItemRenderData{CustomData: nbt.NewNbtCompound(map[string]nbt.NbtTag{
+		"id": nbt.NewNbtString("AATROX_BATPHONE"),
+	})}
+
+	if model := renderer.ResolveSkyblockItemModelFromPackProviders("aatrox_batphone", "minecraft:player_head", itemData, "gui"); model == nil {
+		t.Fatal("model did not resolve")
+	}
+
+	renderer._skyblockItemDefinitionsMu.RLock()
+	cacheSize := len(renderer._skyblockItemDefinitions)
+	renderer._skyblockItemDefinitionsMu.RUnlock()
+	if cacheSize == 0 {
+		t.Fatal("skyblock item definition cache was not populated")
+	}
+
+	if err := renderer.ReloadResourcePacks(); err != nil {
+		t.Fatal(err)
+	}
+
+	renderer._skyblockItemDefinitionsMu.RLock()
+	cacheSize = len(renderer._skyblockItemDefinitions)
+	renderer._skyblockItemDefinitionsMu.RUnlock()
+	if cacheSize != 0 {
+		t.Fatalf("skyblock item definition cache was not cleared, len=%d", cacheSize)
+	}
+}
+
 func TestFsrMidasSwordUsesPackSelector(t *testing.T) {
 	assetsRoot := requireFullAssets(t)
 	packRoot := requireTexturePack(t, "fsr")
