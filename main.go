@@ -13,12 +13,12 @@ const (
 	DefaultSize = 128
 )
 
-var DefaultPackIDs = []string{"fsr", "hplus"}
-
 type Options struct {
-	Size    int
-	PackIDs []string
-	Preload bool
+	AssetsRoot        string
+	ResourcePacksRoot string
+	PackIDs           []string
+	Size              int
+	Preload           bool
 }
 
 type RenderedPNG struct {
@@ -32,29 +32,29 @@ type Renderer struct {
 	size     int
 }
 
-func NewRenderer(assetsRoot, texturePacksRoot string) (*Renderer, error) {
-	return NewRendererWithOptions(assetsRoot, texturePacksRoot, Options{
-		Size:    DefaultSize,
-		PackIDs: DefaultPackIDs,
-		Preload: true,
-	})
+func NewRenderer(options Options) (*Renderer, error) {
+	return NewRendererWithOptions(options)
 }
 
-func NewRendererWithOptions(assetsRoot, texturePacksRoot string, options Options) (*Renderer, error) {
+func NewRendererWithOptions(options Options) (*Renderer, error) {
+	if options.AssetsRoot == "" {
+		return nil, fmt.Errorf("assets root is required")
+	}
+	if options.ResourcePacksRoot == "" {
+		return nil, fmt.Errorf("resource packs root is required")
+	}
+
 	size := options.Size
 	if size <= 0 {
 		size = DefaultSize
 	}
 
 	packIDs := append([]string(nil), options.PackIDs...)
-	if len(packIDs) == 0 {
-		packIDs = append([]string(nil), DefaultPackIDs...)
-	}
 
 	registry := texturepacks.NewTexturePackRegistry()
-	registry.RegisterAllPacks(texturePacksRoot, false)
+	registry.RegisterAllPacks(options.ResourcePacksRoot, false)
 
-	blockRenderer := mbr.CreateFromMinecraftAssets(assetsRoot, registry, packIDs)
+	blockRenderer := mbr.CreateFromMinecraftAssets(options.AssetsRoot, registry, packIDs)
 	if options.Preload {
 		blockRenderer.PreloadRegisteredPacks(true)
 	}
