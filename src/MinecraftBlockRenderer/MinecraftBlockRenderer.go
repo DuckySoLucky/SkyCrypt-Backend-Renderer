@@ -90,6 +90,8 @@ type MinecraftBlockRenderer struct {
 	_playerSkinCache          map[string]*image.RGBA
 }
 
+type ItemRenderData = data.ItemRenderData
+
 func (renderer *MinecraftBlockRenderer) GetLayerTint(context SkullResolverContext, layerIndex int) (tintColor int, hasTint bool) {
 	if context.ItemData != nil && context.ItemData.GetLayerTint != nil {
 		return context.ItemData.GetLayerTint(layerIndex)
@@ -137,7 +139,7 @@ func DefaultBlockRenderOptions() BlockRenderOptions {
 		UseGuiTransform:    true,
 		Padding:            0.12,
 		AdditionalScale:    1,
-		EnableAntiAliasing: true,
+		EnableAntiAliasing: false,
 	}
 }
 
@@ -179,8 +181,9 @@ func CreateFromMinecraftAssets(
 		textureRoot = assetsDirectory
 	}
 
+	// fmt.Print("WTATIAWTABTAOJTNIA_ textureRoot: ", textureRoot, "\n")
+
 	var textureRepository = data.NewTextureRepository(textureRoot, nil, overlayPaths, packContext.AssetNamespaces)
-	fmt.Printf("\n\nFUCK ME IN THE ASS\n\n")
 
 	return NewMinecraftBlockRenderer(modelResolver, textureRepository, blockRegistry, itemRegistry, assetsDirectory, overlayRoots, texturePackRegistry, *packContext)
 }
@@ -501,7 +504,50 @@ func (renderer *MinecraftBlockRenderer) RenderBlock(blockName string, options Bl
 		return nil
 	}
 
-	effectiveOptions := options
+	// Merge provided options into defaults. We treat zero-values as "not provided"
+	// so callers can pass a struct literal with only a few fields (e.g. Size).
+	effectiveOptions := DefaultBlockRenderOptions()
+	if options.Size != 0 {
+		effectiveOptions.Size = options.Size
+	}
+	if options.YawInDegrees != 0 {
+		effectiveOptions.YawInDegrees = options.YawInDegrees
+	}
+	if options.PitchInDegrees != 0 {
+		effectiveOptions.PitchInDegrees = options.PitchInDegrees
+	}
+	if options.RollInDegrees != 0 {
+		effectiveOptions.RollInDegrees = options.RollInDegrees
+	}
+	if options.PerspectiveAmount != 0 {
+		effectiveOptions.PerspectiveAmount = options.PerspectiveAmount
+	}
+	if options.Padding != 0 {
+		effectiveOptions.Padding = options.Padding
+	}
+	if options.AdditionalScale != 0 {
+		effectiveOptions.AdditionalScale = options.AdditionalScale
+	}
+	// AdditionalTranslation: treat non-zero vector as provided
+	if options.AdditionalTranslation != (data.Vector3{}) {
+		effectiveOptions.AdditionalTranslation = options.AdditionalTranslation
+	}
+	if options.OverrideGuiTransform != nil {
+		effectiveOptions.OverrideGuiTransform = options.OverrideGuiTransform
+	}
+	if len(options.PackIds) > 0 {
+		effectiveOptions.PackIds = options.PackIds
+	}
+	if options.ItemData != nil {
+		effectiveOptions.ItemData = options.ItemData
+	}
+	if options.SkullTextureResolver != nil {
+		effectiveOptions.SkullTextureResolver = options.SkullTextureResolver
+	}
+	if options.EnableAntiAliasing {
+		effectiveOptions.EnableAntiAliasing = options.EnableAntiAliasing
+	}
+
 	rendererForOptions, forwardedOptions := renderer.ResolveRendererForOptions(effectiveOptions)
 	return rendererForOptions.RenderBlockInternal(blockName, forwardedOptions)
 }
@@ -513,19 +559,22 @@ func (renderer *MinecraftBlockRenderer) RenderBlockInternal(blockName string, op
 	}
 
 	model := renderer._modelResolver.Resolve(modelName)
+
+	// Console.WriteLine($"Rendering block '{blockName}' using model '{modelName}' with {model.Elements.Count} elements.");
+	// fmt.Printf("Rendering block '%s' using model '%s' with %d elements\n", blockName, modelName, len(model.Elements))
+
 	return renderer.RenderModel(model, options, &blockName)
 }
 
 func (renderer *MinecraftBlockRenderer) RenderItem(itemName string, itemData *data.ItemRenderData, options *BlockRenderOptions) *image.RGBA {
-	if itemData == nil {
-		return nil
-	}
-
 	effectiveOptions := DefaultBlockRenderOptions()
 	if options != nil {
 		effectiveOptions = *options
 	}
-	effectiveOptions.ItemData = itemData
+
+	if itemData != nil {
+		effectiveOptions.ItemData = itemData
+	}
 
 	rendererForOptions, forwardedOptions := renderer.ResolveRendererForOptions(effectiveOptions)
 	return rendererForOptions.RenderGuiItemInternal(itemName, &forwardedOptions, nil)

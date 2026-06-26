@@ -50,19 +50,21 @@ type ItemDefinitionEntry struct {
 type MinecraftAssetLoader struct{}
 
 func (m *MinecraftAssetLoader) LoadModelDefinitions(assetsRoot string, overlayRoots *[]string, assetNamespaces *assets.AssetNamespaceRegistry) map[string]BlockModelDefinition {
-	namespaceRoots := m.BuildNamespaceRootList(assetsRoot, overlayRoots, assetNamespaces, "minecraft", true)
+
+	// fmt.Printf("assetsRoot: %s, \noverlayRoots: %+v, \nassetNamespaces: %+v\n", assetsRoot, overlayRoots, assetNamespaces)
+	namespaceRoots := BuildNamespaceRootList(assetsRoot, overlayRoots, assetNamespaces, "minecraft", true)
 	definitions := make(map[string]BlockModelDefinition)
 
 	hasAnyModels := false
 	for _, namespaceRoot := range namespaceRoots {
-		provider, err := assets.NewDirectoryResourceProvider(namespaceRoot.Path)
-		if err != nil {
-			fmt.Printf("Error creating directory resource provider for path %s: %v\n", namespaceRoot.Path, err)
+		// fmt.Printf("Processing namespace root: %s (namespace: %s, source: %s)\n", namespaceRoot.Path, namespaceRoot.Namespace, namespaceRoot.SourceId)
+		provider := *namespaceRoot.Provider
+		if provider == nil {
+			fmt.Printf("Warning: No resource provider found for namespace root at path '%s'. Skipping.\n", namespaceRoot.Path)
 			continue
 		}
-		providerV2 := assets.ResourceProviderExtensions{}
 
-		for _, modelDir := range m.EnumerateModelDirectoryNames(&namespaceRoot) {
+		for _, modelDir := range m.EnumerateModelDirectoryNames(provider) {
 			hasAnyModels = true
 			emuratedFiles, err := provider.EnumerateFiles(modelDir, "*.json", true)
 			if err != nil {
@@ -71,13 +73,13 @@ func (m *MinecraftAssetLoader) LoadModelDefinitions(assetsRoot string, overlayRo
 			}
 
 			for _, file := range emuratedFiles {
-				relativePath := providerV2.GetRelativePath(file, modelDir)
+				relativePath := assets.ResourceProviderExtensionsInstance.GetRelativePath(file, modelDir)
 				key := m.NormalizeModelKey(relativePath, namespaceRoot.Namespace)
 				if strings.TrimSpace(key) == "" {
 					continue
 				}
 
-				jsonContent, err := providerV2.ReadAllText(*provider, file)
+				jsonContent, err := assets.ResourceProviderExtensionsInstance.ReadAllText(provider, file)
 				if err != nil {
 					fmt.Printf("Error reading file %s: %v\n", file, err)
 					continue
@@ -109,69 +111,82 @@ func (m *MinecraftAssetLoader) LoadModelDefinitions(assetsRoot string, overlayRo
 	return definitions
 }
 
-func (m *MinecraftAssetLoader) tryAdd(dedupe map[string]struct{}, results *[]assets.AssetNamespaceRoot, effectiveNamespace string, candidate string) {
-	if strings.TrimSpace(candidate) == "" {
-		return
-	}
-
-	fullPath, err := os.Getwd()
-	if err != nil {
-		fmt.Printf("Error getting current working directory: %v\n", err)
-		return
-	}
-	fullPath = fmt.Sprintf("%s/%s", fullPath, candidate)
-
-	info, err := os.Stat(fullPath)
-	if err != nil || !info.IsDir() {
-		return
-	}
-
-	if _, exists := dedupe[fullPath]; exists {
-		return
-	}
-
-	dedupe[fullPath] = struct{}{}
-
-	*results = append(*results, assets.AssetNamespaceRoot{
-		Namespace: effectiveNamespace,
-		Path:      fullPath,
-		SourceId:  "external",
-		IsVanilla: false,
-	})
-}
-
-func (m *MinecraftAssetLoader) BuildNamespaceRootList(primaryRoot string, overlayRoots *[]string, assetNamespaces *assets.AssetNamespaceRegistry, namespaceName string, includeAllNamespaces bool) []assets.AssetNamespaceRoot {
+func BuildNamespaceRootList(primaryRoot string, overlayRoots *[]string, assetNamespaces *assets.AssetNamespaceRegistry, namespaceName string, includeAllNamespaces bool) []*assets.AssetNamespaceRoot {
 	if assetNamespaces != nil {
-		var resolvedNamespaces []assets.AssetNamespaceRoot
+		var resolvedNamespaces []*assets.AssetNamespaceRoot
 		if includeAllNamespaces {
 			resolvedNamespaces = assetNamespaces.Roots()
+			// fmt.Print("_________ Including all namespaces from registry:\n")
+			// for _, root := range resolvedNamespaces {
+			// 	fmt.Printf("  - %s (%s) Provider: %v %v\n", root.Namespace, root.Path, root.Provider == nil, (*root.Provider).RootPath())
+
+			// }
+
 		} else {
 			resolvedNamespaces = assetNamespaces.ResolveRoots(namespaceName, true)
+			// Console.WriteLine($"__________________Resolved {resolvedNamespaces.Count()} roots for namespace '{namespaceName}':");
+			// fmt.Printf("__________________Resolved %d roots for namespace '%s':\n", len(resolvedNamespaces), namespaceName)
 		}
 
-		resolvedList := m.DeduplicateNamespaceRoots(resolvedNamespaces)
+		resolvedList := DeduplicateNamespaceRoots(resolvedNamespaces)
 		if len(resolvedList) > 0 {
+			// fmt.Printf("-!!!!!!!!!!!!!!!!!!!!!! Resolved namespace roots:\n")
+			// for _, root := range resolvedList {
+			// 	fmt.Printf("  - %s (%s)\n", root.Namespace, root.Path)
+			// }
+
 			return resolvedList
 		}
 	}
 
 	dedupe := make(map[string]struct{})
-	results := []assets.AssetNamespaceRoot{}
+	results := []*assets.AssetNamespaceRoot{}
 	effectiveNamespace := namespaceName
 	if effectiveNamespace == "" {
 		effectiveNamespace = "minecraft"
 	}
 
-	m.tryAdd(dedupe, &results, effectiveNamespace, primaryRoot)
-	for _, overlay := range *overlayRoots {
-		m.tryAdd(dedupe, &results, effectiveNamespace, overlay)
+	tryAdd := func(candidate string) {
+		if strings.TrimSpace(candidate) == "" {
+			return
+		}
+
+		fullPath, err := os.Getwd()
+		if err != nil {
+			fmt.Printf("Error getting current working directory: %v\n", err)
+		}
+
+		fullPath = fmt.Sprintf("%s/%s", fullPath, candidate)
+		info, err := os.Stat(fullPath)
+		if err != nil || !info.IsDir() {
+			return
+		}
+
+		if _, exists := dedupe[fullPath]; exists {
+			return
+		}
+
+		dedupe[fullPath] = struct{}{}
+		results = append(results, &assets.AssetNamespaceRoot{
+			Namespace: effectiveNamespace,
+			Path:      fullPath,
+			SourceId:  "external",
+			IsVanilla: false,
+		})
+	}
+
+	tryAdd(primaryRoot)
+	if overlayRoots != nil {
+		for _, overlay := range *overlayRoots {
+			tryAdd(overlay)
+		}
 	}
 
 	return results
 }
 
-func (m *MinecraftAssetLoader) DeduplicateNamespaceRoots(roots []assets.AssetNamespaceRoot) []assets.AssetNamespaceRoot {
-	var results []assets.AssetNamespaceRoot
+func DeduplicateNamespaceRoots(roots []*assets.AssetNamespaceRoot) []*assets.AssetNamespaceRoot {
+	var results []*assets.AssetNamespaceRoot
 	var seen = make(map[string]struct{})
 
 	for _, root := range roots {
@@ -182,7 +197,7 @@ func (m *MinecraftAssetLoader) DeduplicateNamespaceRoots(roots []assets.AssetNam
 		path := root.Path
 		if info, err := os.Stat(path); err == nil && info.IsDir() {
 			path = fmt.Sprintf("%s/%s", path, root.Namespace)
-			fmt.Printf("MIGHT BREAK?")
+			// fmt.Printf("MIGHT BREAK?\n")
 		}
 
 		namespaceKey := root.Namespace
@@ -197,11 +212,24 @@ func (m *MinecraftAssetLoader) DeduplicateNamespaceRoots(roots []assets.AssetNam
 
 		seen[identity] = struct{}{}
 
-		results = append(results, assets.AssetNamespaceRoot{
+		var provider assets.ResourceProvider
+		if root.Provider == nil {
+			resourceProvider, err := assets.NewDirectoryResourceProvider(path)
+			if err != nil {
+				fmt.Printf("Error creating directory resource provider for path %s: %v\n", path, err)
+				continue
+			}
+			provider = resourceProvider
+		} else {
+			provider = *root.Provider
+		}
+
+		results = append(results, &assets.AssetNamespaceRoot{
 			Namespace: root.Namespace,
 			Path:      path,
 			SourceId:  root.SourceId,
 			IsVanilla: root.IsVanilla,
+			Provider:  &provider,
 		})
 	}
 
@@ -218,17 +246,17 @@ func (m *MinecraftAssetLoader) DirectoryExists(provider *assets.AssetNamespaceRo
 	return err == nil && info.IsDir()
 }
 
-func (m *MinecraftAssetLoader) EnumerateModelDirectoryNames(provider *assets.AssetNamespaceRoot) []string {
+func (m *MinecraftAssetLoader) EnumerateModelDirectoryNames(provider assets.ResourceProvider) []string {
 	var results []string
 	if provider == nil {
 		return results
 	}
 
-	if m.DirectoryExists(provider, "models") {
+	if provider.DirectoryExists("models") {
 		results = append(results, "models")
 	}
 
-	if m.DirectoryExists(provider, "blockentities/blockModels") {
+	if provider.DirectoryExists("blockentities/blockModels") {
 		results = append(results, "blockentities/blockModels")
 	}
 
@@ -285,31 +313,33 @@ func MinecraftAssetLoaderLoadBlockInfos(assetsRoot string, modelDefinitions map[
 		panic("modelDefinitions cannot be null")
 	}
 
-	namespaceRoots := (&MinecraftAssetLoader{}).BuildNamespaceRootList(assetsRoot, &overlayRoots, assetNamespaces, "minecraft", true)
+	namespaceRoots := BuildNamespaceRootList(assetsRoot, &overlayRoots, assetNamespaces, "minecraft", false)
+	// fmt.Printf("namespaceRoots: %+v\n", namespaceRoots)
 	var entries []BlockInfo
-	hasAnyBlockstates := false
 
-	for _, namespaceRoot := range namespaceRoots {
-		provider, err := assets.NewDirectoryResourceProvider(namespaceRoot.Path)
-		if err != nil {
-			fmt.Printf("Error creating directory resource provider for path %s: %v\n", namespaceRoot.Path, err)
+	hasAnyBlockstates := false
+	for _, root := range namespaceRoots {
+		provider := root.Provider
+		if provider == nil {
+			fmt.Printf("Warning: No resource provider found for namespace root at path '%s'. Skipping.\n", root.Path)
 			continue
 		}
-		providerV2 := assets.ResourceProviderExtensions{}
 
-		for _, bsDir := range EnumerateBlockstateDirectoryNames(&namespaceRoot) {
+		names := EnumerateBlockstateDirectoryNames(*provider)
+		// fmt.Printf("names: %+v\n", names)
+		for _, bsDir := range names {
 			hasAnyBlockstates = true
-			emuratedFiles, err := provider.EnumerateFiles(bsDir, ".json", true)
+			emuratedFiles, err := (*provider).EnumerateFiles(bsDir, ".json", true)
 			if err != nil {
 				fmt.Printf("Error enumerating files in directory %s: %v\n", bsDir, err)
 				continue
 			}
 
 			for _, file := range emuratedFiles {
-				relativePath := providerV2.GetRelativePath(file, bsDir)
+				relativePath := assets.ResourceProviderExtensionsInstance.GetRelativePath(file, bsDir)
 				blockName := NormalizeBlockStateName(relativePath)
 
-				jsonContent, err := providerV2.ReadAllText(*provider, file)
+				jsonContent, err := assets.ResourceProviderExtensionsInstance.ReadAllText(*provider, file)
 				if err != nil {
 					fmt.Printf("Error reading file %s: %v\n", file, err)
 					continue
@@ -330,6 +360,9 @@ func MinecraftAssetLoaderLoadBlockInfos(assetsRoot string, modelDefinitions map[
 					Model:      modelReference,
 					Texture:    textureReference,
 				})
+
+				// Console.WriteLine($"Loaded blockstate for '{blockName}' with model reference '{modelReference}' and texture reference '{textureReference}'.");
+				// fmt.Printf("Loaded blockstate for '%s' with model reference '%s' and texture reference '%s'\n", blockName, *modelReference, *textureReference)
 			}
 		}
 	}
@@ -342,17 +375,18 @@ func MinecraftAssetLoaderLoadBlockInfos(assetsRoot string, modelDefinitions map[
 	return entries
 }
 
-func EnumerateBlockstateDirectoryNames(provider *assets.AssetNamespaceRoot) []string {
+func EnumerateBlockstateDirectoryNames(provider assets.ResourceProvider) []string {
 	var results []string
 	if provider == nil {
+		fmt.Printf("Provider is nil, cannot enumerate blockstate directories.\n")
 		return results
 	}
 
-	if (&MinecraftAssetLoader{}).DirectoryExists(provider, "blockstates") {
+	if provider.DirectoryExists("blockstates") {
 		results = append(results, "blockstates")
 	}
 
-	if (&MinecraftAssetLoader{}).DirectoryExists(provider, "blockentities/blockStates") {
+	if provider.DirectoryExists("blockentities/blockStates") {
 		results = append(results, "blockentities/blockStates")
 	}
 
@@ -672,11 +706,11 @@ func IsTemplateItem(itemName string) bool {
 }
 
 func EnumerateItemDefinitions(assetsRoot string, overlayRoots []string, assetNamespaces *assets.AssetNamespaceRegistry) []ItemDefinitionEntry {
-	namespaceRoots := (&MinecraftAssetLoader{}).BuildNamespaceRootList(assetsRoot, &overlayRoots, assetNamespaces, "minecraft", true)
+	namespaceRoots := BuildNamespaceRootList(assetsRoot, &overlayRoots, assetNamespaces, "minecraft", true)
 
 	for _, nsRoot := range namespaceRoots {
-		provider := nsRoot.Provider
-		if provider == nil || !(&MinecraftAssetLoader{}).DirectoryExists(&nsRoot, "items") {
+		provider := *nsRoot.Provider
+		if provider == nil || !MinecraftAssetLoaderInstance.DirectoryExists(nsRoot, "items") {
 			continue
 		}
 
@@ -899,3 +933,5 @@ func ResolveModelReferenceFromItemDefinition(itemData map[string]interface{}) st
 
 	return ""
 }
+
+var MinecraftAssetLoaderInstance = &MinecraftAssetLoader{}

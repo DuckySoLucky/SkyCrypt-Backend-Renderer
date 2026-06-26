@@ -158,11 +158,40 @@ func (c *CatsResourceProvider) Close() error {
 }
 
 func (c *CatsResourceProvider) GetRelativePath(fullRelativePath string, directoryPrefix string) (string, error) {
-	panic("GetRelativePath is not implemented for CatsResourceProvider")
+	// normalized, err := normalizePath(fullRelativePath)
+	// if err != nil {
+	// 	return "", err
+	// }
+
+	// prefix := strings.TrimRight(strings.ReplaceAll(directoryPrefix, "\\", "/"), "/")
+	// if prefix == "." {
+	// 	prefix = ""
+	// }
+
+	// if prefix != "" {
+	// 	if !strings.HasPrefix(normalized, prefix+"/") {
+	// 		return "", fmt.Errorf("path '%s' does not start with expected directory prefix '%s'", fullRelativePath, directoryPrefix)
+	// 	}
+	// 	return normalized[len(prefix)+1:], nil
+	// }
+
+	// return normalized, nil
+	panic("GetRelativePath is not implemented for CatsResourceProvider because it's not needed in the current usage. If you need this functionality, please implement it based on your specific requirements.")
 }
 
 func (c *CatsResourceProvider) ReadAllText(path string) (string, error) {
-	panic("ReadAllText is not implemented for CatsResourceProvider")
+	rs, err := c.OpenRead(path)
+	if err != nil {
+		return "", err
+	}
+	defer rs.Close()
+
+	data, err := io.ReadAll(rs)
+	if err != nil {
+		return "", err
+	}
+
+	return string(data), nil
 }
 
 // --- Indexing and helpers ---

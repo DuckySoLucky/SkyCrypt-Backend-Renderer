@@ -2,54 +2,71 @@ package main
 
 import (
 	minecraftblockrenderer "duckysolucky/gorenderer/src/MinecraftBlockRenderer"
+	texturepacks "duckysolucky/gorenderer/src/TexturePacks"
 	"fmt"
 	"image/png"
 	"os"
+	"path/filepath"
+
+	nbt "duckysolucky/gorenderer/src/NBT"
 )
 
 func main() {
-	// if len(os.Args) < 2 {
-	// 	fmt.Println("Usage: go run main.go <assets_directory>")
-	// 	return
-	// }
+	// var assetsPath = System.IO.Path.Combine(Directory.GetCurrentDirectory(), "minecraft", "assets", "minecraft");
 
-	// assetsPath := os.Args[1]
-	// resolvedPath, err := assets.ResolveAssetsDirectory(assetsPath)
-	// if err != nil {
-	// 	fmt.Printf("Error resolving assets directory: %v\n", err)
-	// 	return
-	// }
+	// assetsPath := rootPath of the resource pack, which is the same as the path used to create the registry
+	cwd, _ := os.Getwd()
+	assetsPath := filepath.Join(cwd, "packs", "assets", "minecraft")
+	texturePacksPath := filepath.Join(cwd, "texturepacks")
 
-	// fmt.Printf("Assets directory resolved to: %s\n", *resolvedPath)
+	registry := texturepacks.NewTexturePackRegistry()
+	registry.RegisterAllPacks(texturePacksPath, false)
+	renderer := minecraftblockrenderer.CreateFromMinecraftAssets(assetsPath, registry, nil)
+	renderer.PreloadRegisteredPacks(true)
 
-	// if err := assets.DownloadAssets("1.21.11", *resolvedPath, false); err != nil {
-	// 	fmt.Printf("Error downloading assets: %v\n", err)
-	// 	return
-	// }
-
-	assetsPath := "packs/assets"
-
-	renderer := minecraftblockrenderer.CreateFromMinecraftAssets(assetsPath, nil, nil)
+	packs := renderer.GetLoadedResourcePacks()
+	for _, pack := range packs {
+		fmt.Printf("Loaded resource pack: %s - (%+v)\n", pack.Pack.DisplayName, pack.Meta.Version)
+	}
 
 	// stone := renderer.RenderBlock("stone", minecraftblockrenderer.BlockRenderOptions{Size: 256})
 
-	dirt := renderer.RenderGuiItemInternal("birch_chest_boat", &minecraftblockrenderer.BlockRenderOptions{Size: 256}, nil)
-	if dirt != nil {
-		outputFile, err := os.Create("dirt.png")
-		if err != nil {
-			fmt.Printf("Error creating output file: %v\n", err)
-			return
-		}
-		defer outputFile.Close()
+	// dirt := renderer.RenderBlock("crafting_table", minecraftblockrenderer.BlockRenderOptions{Size: 256, EnableAntiAliasing: false})
+	// if dirt != nil {
+	// 	outputFile, err := os.Create("dirt.png")
+	// 	if err != nil {
+	// 		fmt.Printf("Error creating output file: %v\n", err)
+	// 		return
+	// 	}
+	// 	defer outputFile.Close()
 
-		if err := png.Encode(outputFile, dirt); err != nil {
-			fmt.Printf("Error encoding PNG: %v\n", err)
-			return
-		}
+	// 	if err := png.Encode(outputFile, dirt); err != nil {
+	// 		fmt.Printf("Error encoding PNG: %v\n", err)
+	// 		return
+	// 	}
 
-		fmt.Println("Dirt item rendered and saved as dirt.png")
+	// 	fmt.Println("Dirt item rendered and saved as dirt.png")
+	// }
+	// diamondSword := renderer.RenderItem(
+	// 	"minecraft:diamond_sword",
+	// 	nil,
+	// 	&minecraftblockrenderer.BlockRenderOptions{Size: 256, EnableAntiAliasing: false},
+	// )
+	// if diamondSword != nil {
+	// 	outputFile, err := os.Create("diamond_sword.png")
+	// 	if err != nil {
+	// 		fmt.Printf("Error creating output file: %v\n", err)
+	// 		return
+	// 	}
+	// 	defer outputFile.Close()
 
-	}
+	// 	if err := png.Encode(outputFile, diamondSword); err != nil {
+	// 		fmt.Printf("Error encoding PNG: %v\n", err)
+	// 		return
+	// 	}
+
+	// 	fmt.Println("Diamond sword item rendered and saved as diamond_sword.png")
+	// }
 
 	// if stone != nil {
 	// 	outputFile, err := os.Create("stone.png")
@@ -67,5 +84,42 @@ func main() {
 	// 	fmt.Println("Stone block rendered and saved as stone.png")
 
 	// }
+
+	// 	var newItemData = new MinecraftBlockRenderer.ItemRenderData(
+	// 	CustomData: new NbtCompound(new[]{
+	// 		new KeyValuePair<string, NbtTag>("id", new NbtString("ASPECT_OF_THE_VOID"))
+	// 	})
+	// );
+
+	// var newOptions = MinecraftBlockRenderer.BlockRenderOptions.Default with { PackIds = new[] { "fsr" }, ItemData = newItemData };
+
+	// var output = renderer.RenderGuiItemWithResourceId("minecraft:diamond_sword", newOptions);
+	// output.Image.Save("rendered_diamond_sword.png");
+	// Console.WriteLine("Saved rendered_diamond_sword.png");
+	newItemData := &minecraftblockrenderer.ItemRenderData{
+		CustomData: nbt.NewNbtCompound(map[string]nbt.NbtTag{
+			"id": nbt.NewNbtString("ASPECT_OF_THE_VOID"),
+		}),
+	}
+	newOptions := minecraftblockrenderer.BlockRenderOptions{
+		PackIds:  []string{"fsr"},
+		ItemData: newItemData,
+	}
+	output := renderer.RenderGuiItemWithResourceId("minecraft:diamond_sword", &newOptions)
+	if output != nil {
+		outputFile, err := os.Create("rendered_diamond_sword_with_resource_id.png")
+		if err != nil {
+			fmt.Printf("Error creating output file: %v\n", err)
+			return
+		}
+		defer outputFile.Close()
+
+		if err := png.Encode(outputFile, output.Image); err != nil {
+			fmt.Printf("Error encoding PNG: %v\n", err)
+			return
+		}
+
+		fmt.Println("Diamond sword with resource ID rendered and saved as rendered_diamond_sword_with_resource_id.png")
+	}
 
 }

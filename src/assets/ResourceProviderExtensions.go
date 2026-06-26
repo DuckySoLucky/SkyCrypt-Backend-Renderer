@@ -7,7 +7,7 @@ import (
 
 type ResourceProviderExtensions struct{}
 
-func (r *ResourceProviderExtensions) ReadAllText(provider DirectoryResourceProvider, relativePath string) (string, error) {
+func (r *ResourceProviderExtensions) ReadAllText(provider ResourceProvider, relativePath string) (string, error) {
 	stream, err := provider.OpenRead(relativePath)
 	if err != nil {
 		return "", err
@@ -36,3 +36,5 @@ func (r *ResourceProviderExtensions) GetRelativePath(fullRelativePath, directory
 
 	return fullRelativePath
 }
+
+var ResourceProviderExtensionsInstance = &ResourceProviderExtensions{}

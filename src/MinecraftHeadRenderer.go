@@ -21,8 +21,8 @@ const (
 )
 
 type Vector2 struct {
-	X float32
-	Y float32
+	X float64
+	Y float64
 }
 
 type Rectangle struct {
@@ -34,15 +34,15 @@ type Rectangle struct {
 
 type RenderOptions struct {
 	Size               int
-	YawInDegrees       float32
-	PitchInDegrees     float32
-	RollInDegrees      float32
-	PerspectiveAmount  float32
+	YawInDegrees       float64
+	PitchInDegrees     float64
+	RollInDegrees      float64
+	PerspectiveAmount  float64
 	ShowOverlay        bool
 	EnableAntiAliasing bool
 }
 
-func NewRenderOptions(size int, yaw float32, pitch float32, roll float32) *RenderOptions {
+func NewRenderOptions(size int, yaw float64, pitch float64, roll float64) *RenderOptions {
 	return &RenderOptions{
 		Size:               size,
 		YawInDegrees:       yaw,
@@ -103,7 +103,7 @@ const (
 )
 
 func normalizeVector3(v data.Vector3) data.Vector3 {
-	length := float32(math.Sqrt(float64(v.X*v.X + v.Y*v.Y + v.Z*v.Z)))
+	length := float64(math.Sqrt(v.X*v.X + v.Y*v.Y + v.Z*v.Z))
 	if length == 0 {
 		return v
 	}
@@ -166,24 +166,24 @@ type VisibleTriangle struct {
 	T2          Vector2
 	T3          Vector2
 	TextureRect Rectangle
-	Depth       float32
-	Shading     float32
+	Depth       float64
+	Shading     float64
 	IsOverlay   bool
 }
 
 type BarycentricData struct {
 	V0    Vector2
 	V1    Vector2
-	D00   float32
-	D01   float32
-	D11   float32
-	Denom float32
+	D00   float64
+	D01   float64
+	D11   float64
+	Denom float64
 }
 
 type PerspectiveParams struct {
-	Amount         float32
-	CameraDistance float32
-	FocalLength    float32
+	Amount         float64
+	CameraDistance float64
+	FocalLength    float64
 }
 
 func (_minecraftHeadRenderer *RenderOptions) RenderIsometricHead(options *IsometricRenderOptions, skin image.RGBA) image.RGBA {
@@ -210,7 +210,7 @@ func (_minecraftHeadRenderer *RenderOptions) RenderIsometricHead(options *Isomet
 }
 
 func (_minecraftHeadRenderer *RenderOptions) RenderHead(options *RenderOptions, skin image.RGBA) image.RGBA {
-	deg2Rad := float32(math.Pi / 180)
+	deg2Rad := float64(math.Pi / 180)
 	transform := _minecraftHeadRenderer.createRotationMatrix(
 		options.YawInDegrees*deg2Rad,
 		options.PitchInDegrees*deg2Rad,
@@ -245,11 +245,11 @@ func (_minecraftHeadRenderer *RenderOptions) RenderHead(options *RenderOptions, 
 	})
 
 	canvas := image.NewRGBA(image.Rect(0, 0, options.Size, options.Size))
-	scale := float32(options.Size) / 1.75
-	offset := Vector2{X: float32(options.Size) / 2, Y: float32(options.Size) / 2}
-	depthBuffer := make([]float32, options.Size*options.Size)
+	scale := float64(options.Size) / 1.75
+	offset := Vector2{X: float64(options.Size) / 2, Y: float64(options.Size) / 2}
+	depthBuffer := make([]float64, options.Size*options.Size)
 	for i := range depthBuffer {
-		depthBuffer[i] = float32(math.Inf(1))
+		depthBuffer[i] = float64(math.Inf(1))
 	}
 
 	triangleOrder := 0
@@ -269,7 +269,7 @@ func (_minecraftHeadRenderer *RenderOptions) RenderHead(options *RenderOptions, 
 		p2 := _minecraftHeadRenderer.projectToScreen(tri.V2, scale, offset, perspectiveParams)
 		p3 := _minecraftHeadRenderer.projectToScreen(tri.V3, scale, offset, perspectiveParams)
 
-		depthBias := float32(triangleOrder) * DepthBiasPerTriangle
+		depthBias := float64(triangleOrder) * DepthBiasPerTriangle
 		triangleOrder++
 
 		_minecraftHeadRenderer.rasterizeTriangle(
@@ -298,15 +298,15 @@ func (_minecraftHeadRenderer *RenderOptions) RenderHead(options *RenderOptions, 
 	return *canvas
 }
 
-func (_minecraftHeadRenderer *RenderOptions) createRotationMatrix(yaw, pitch, roll float32) [4][4]float32 {
-	cosY := float32(math.Cos(float64(yaw)))
-	sinY := float32(math.Sin(float64(yaw)))
-	cosP := float32(math.Cos(float64(pitch)))
-	sinP := float32(math.Sin(float64(pitch)))
-	cosR := float32(math.Cos(float64(roll)))
-	sinR := float32(math.Sin(float64(roll)))
+func (_minecraftHeadRenderer *RenderOptions) createRotationMatrix(yaw, pitch, roll float64) [4][4]float64 {
+	cosY := float64(math.Cos(float64(yaw)))
+	sinY := float64(math.Sin(float64(yaw)))
+	cosP := float64(math.Cos(float64(pitch)))
+	sinP := float64(math.Sin(float64(pitch)))
+	cosR := float64(math.Cos(float64(roll)))
+	sinR := float64(math.Sin(float64(roll)))
 
-	return [4][4]float32{
+	return [4][4]float64{
 		{cosY*cosR + sinY*sinP*sinR, -cosY*sinR + sinY*sinP*cosR, sinY * cosP, 0},
 		{cosP * sinR, cosP * cosR, -sinP, 0},
 		{-sinY*cosR + cosY*sinP*sinR, sinY*sinR + cosY*sinP*cosR, cosY * cosP, 0},
@@ -314,7 +314,7 @@ func (_minecraftHeadRenderer *RenderOptions) createRotationMatrix(yaw, pitch, ro
 	}
 }
 
-func (_minecraftHeadRenderer *RenderOptions) processFaces(faces []FaceData, transform [4][4]float32, isOverlay bool, triangles *[]VisibleTriangle) {
+func (_minecraftHeadRenderer *RenderOptions) processFaces(faces []FaceData, transform [4][4]float64, isOverlay bool, triangles *[]VisibleTriangle) {
 	mappings := BaseMappings
 	if isOverlay {
 		mappings = OverlayMappings
@@ -367,7 +367,7 @@ func (_minecraftHeadRenderer *RenderOptions) processFaces(faces []FaceData, tran
 	}
 }
 
-func (_minecraftHeadRenderer *RenderOptions) transformVector3(v data.Vector3, m [4][4]float32) data.Vector3 {
+func (_minecraftHeadRenderer *RenderOptions) transformVector3(v data.Vector3, m [4][4]float64) data.Vector3 {
 	x := v.X*m[0][0] + v.Y*m[1][0] + v.Z*m[2][0] + m[3][0]
 	y := v.X*m[0][1] + v.Y*m[1][1] + v.Z*m[2][1] + m[3][1]
 	z := v.X*m[0][2] + v.Y*m[1][2] + v.Z*m[2][2] + m[3][2]
@@ -386,14 +386,14 @@ func vector3Cross(a, b data.Vector3) data.Vector3 {
 	}
 }
 
-func (_minecraftHeadRenderer *RenderOptions) ComputeInventoryLightingIntensity(normal data.Vector3) float32 {
+func (_minecraftHeadRenderer *RenderOptions) ComputeInventoryLightingIntensity(normal data.Vector3) float64 {
 	const normalEpsilon = 1e-6
 	lengthSquared := normal.X*normal.X + normal.Y*normal.Y + normal.Z*normal.Z
 	if lengthSquared <= normalEpsilon {
 		return 1
 	}
 
-	length := float32(math.Sqrt(float64(lengthSquared)))
+	length := float64(math.Sqrt(float64(lengthSquared)))
 	normalized := data.Vector3{X: normal.X / length, Y: normal.Y / length, Z: normal.Z / length}
 
 	if normalized.Y >= 0.6 {
@@ -402,10 +402,10 @@ func (_minecraftHeadRenderer *RenderOptions) ComputeInventoryLightingIntensity(n
 
 	lightContribution0 := math.Max(0, float64(normalized.X*InventoryLightDirection.X+normalized.Y*InventoryLightDirection.Y+normalized.Z*InventoryLightDirection.Z))
 	intensity := InventoryAmbientStrength + InventoryDiffuseStrength*math.Min(1, lightContribution0)
-	return float32(math.Max(0.2, math.Min(float64(intensity), 1)))
+	return float64(math.Max(0.2, math.Min(float64(intensity), 1)))
 }
 
-func (_minecraftHeadRenderer *RenderOptions) projectToScreen(point data.Vector3, scale float32, offset Vector2, perspectiveParams *PerspectiveParams) Vector2 {
+func (_minecraftHeadRenderer *RenderOptions) projectToScreen(point data.Vector3, scale float64, offset Vector2, perspectiveParams *PerspectiveParams) Vector2 {
 	if perspectiveParams == nil {
 		return Vector2{X: point.X*scale + offset.X, Y: -point.Y*scale + offset.Y}
 	}
@@ -428,13 +428,13 @@ func (_minecraftHeadRenderer *RenderOptions) projectToScreen(point data.Vector3,
 
 func (_minecraftHeadRenderer *RenderOptions) rasterizeTriangle(
 	canvas *image.RGBA,
-	depthBuffer []float32,
-	depthBias float32,
-	z1, z2, z3 float32,
+	depthBuffer []float64,
+	depthBias float64,
+	z1, z2, z3 float64,
 	p1, p2, p3 Vector2,
 	t1, t2, t3 Vector2,
 	skin image.RGBA, textureRect Rectangle,
-	shadingFactor float32,
+	shadingFactor float64,
 	isOverlay bool) {
 	area := (p2.X-p1.X)*(p3.Y-p1.Y) - (p3.X-p1.X)*(p2.Y-p1.Y)
 	if math.Abs(float64(area)) < 0.01 {
@@ -454,24 +454,21 @@ func (_minecraftHeadRenderer *RenderOptions) rasterizeTriangle(
 		return
 	}
 
-	// Calculate bounding box
 	minX := int(math.Max(0, math.Min(math.Min(float64(p1.X), float64(p2.X)), float64(p3.X))))
 	minY := int(math.Max(0, math.Min(math.Min(float64(p1.Y), float64(p2.Y)), float64(p3.Y))))
 	maxX := int(math.Min(float64(canvas.Bounds().Dx()-1), math.Ceil(math.Max(math.Max(float64(p1.X), float64(p2.X)), float64(p3.X)))))
 	maxY := int(math.Min(float64(canvas.Bounds().Dy()-1), math.Ceil(math.Max(math.Max(float64(p1.Y), float64(p2.Y)), float64(p3.Y)))))
 
-	// Pre-calculate texture dimensions for clamping
 	textWidth := textureRect.Width - 1
 	textHeight := textureRect.Height - 1
 
-	// Rasterize triangle
 	width := canvas.Bounds().Dx()
 	const depthTestEpsilon = 1e-6
 	const alphaThreshold = 10
 
 	for y := minY; y <= maxY; y++ {
 		for x := minX; x <= maxX; x++ {
-			point := Vector2{X: float32(x) + 0.5, Y: float32(y) + 0.5}
+			point := Vector2{X: float64(x) + 0.5, Y: float64(y) + 0.5}
 			bary := getBarycentric(p1, point, v0, v1, d00, d01, d11, denom)
 
 			const epsilon = 1e-5
@@ -486,8 +483,8 @@ func (_minecraftHeadRenderer *RenderOptions) rasterizeTriangle(
 				Y: t1.Y*bary.X + t2.Y*bary.Y + t3.Y*bary.Z,
 			}
 
-			texX := int(math.Max(0, math.Min(float64(texCoord.X*float32(textureRect.Width)), float64(textWidth))))
-			texY := int(math.Max(0, math.Min(float64(texCoord.Y*float32(textureRect.Height)), float64(textHeight))))
+			texX := int(math.Max(0, math.Min(float64(texCoord.X*float64(textureRect.Width)), float64(textWidth))))
+			texY := int(math.Max(0, math.Min(float64(texCoord.Y*float64(textureRect.Height)), float64(textHeight))))
 
 			sampled := skin.RGBAAt(textureRect.X+texX, textureRect.Y+texY)
 			if !isOverlay {
@@ -515,15 +512,15 @@ func (_minecraftHeadRenderer *RenderOptions) rasterizeTriangle(
 
 }
 
-func applyShading(original color.RGBA, shadingFactor float32) color.RGBA {
-	factor := float32(math.Max(float64(shadingFactor), 0))
+func applyShading(original color.RGBA, shadingFactor float64) color.RGBA {
+	factor := float64(math.Max(float64(shadingFactor), 0))
 	if math.Abs(float64(factor-1)) <= 1e-4 {
 		return original
 	}
 
-	scaledR := int(math.Round(float64(float32(original.R) * factor)))
-	scaledG := int(math.Round(float64(float32(original.G) * factor)))
-	scaledB := int(math.Round(float64(float32(original.B) * factor)))
+	scaledR := int(math.Round(float64(float64(original.R) * factor)))
+	scaledG := int(math.Round(float64(float64(original.G) * factor)))
+	scaledB := int(math.Round(float64(float64(original.B) * factor)))
 
 	r := uint8(maxInt(0, minInt(255, scaledR)))
 	g := uint8(maxInt(0, minInt(255, scaledG)))
@@ -546,7 +543,7 @@ func maxInt(a, b int) int {
 	return b
 }
 
-func getBarycentric(p1, p Vector2, v0, v1 Vector2, d00, d01, d11, denom float32) data.Vector3 {
+func getBarycentric(p1, p Vector2, v0, v1 Vector2, d00, d01, d11, denom float64) data.Vector3 {
 	v2 := Vector2{X: p.X - p1.X, Y: p.Y - p1.Y}
 	d20 := v2.X*v0.X + v2.Y*v0.Y
 	d21 := v2.X*v1.X + v2.Y*v1.Y

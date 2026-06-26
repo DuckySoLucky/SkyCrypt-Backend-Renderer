@@ -56,7 +56,9 @@ func (_blockRegistry *BlockRegistry) LoadFromMinecraftAssets(assetsRoot string, 
 		panic("modelDefinitions cannot be null")
 	}
 
+	// fmt.Printf("Loading block infos from Minecraft assets...\n")
 	entries := MinecraftAssetLoaderLoadBlockInfos(assetsRoot, modelDefinitions, overlayRoots, assetNamespaces)
+	// fmt.Printf("Balls: %+v\n", entries)
 
 	registry := &BlockRegistry{
 		_entries: make(map[string]BlockInfo),
@@ -66,7 +68,9 @@ func (_blockRegistry *BlockRegistry) LoadFromMinecraftAssets(assetsRoot string, 
 		if strings.TrimSpace(entry.Name) == "" {
 			continue
 		}
+
 		registry._entries[entry.Name] = entry
+		// fmt.Printf("Model: %+v\n", entry)
 	}
 
 	return registry

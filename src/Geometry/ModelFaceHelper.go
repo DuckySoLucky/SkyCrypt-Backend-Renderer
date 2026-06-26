@@ -17,23 +17,23 @@ var FaceVertexIndices = map[data.BlockFaceDirection][4]int{
 func DefaultFaceUv(from, to data.Vector3, direction data.BlockFaceDirection) data.Vector4 {
 	switch direction {
 	case data.Down:
-		return data.Vector4{from.X, float32(16) - to.Z, to.X, float32(16) - from.Z}
+		return data.Vector4{from.X, float64(16) - to.Z, to.X, float64(16) - from.Z}
 	case data.Up:
 		return data.Vector4{from.X, from.Z, to.X, to.Z}
 	case data.North:
-		return data.Vector4{float32(16) - to.X, float32(16) - to.Y, float32(16) - from.X, float32(16) - from.Y}
+		return data.Vector4{float64(16) - to.X, float64(16) - to.Y, float64(16) - from.X, float64(16) - from.Y}
 	case data.South:
-		return data.Vector4{from.X, float32(16) - to.Y, to.X, float32(16) - from.Y}
+		return data.Vector4{from.X, float64(16) - to.Y, to.X, float64(16) - from.Y}
 	case data.West:
-		return data.Vector4{from.Z, float32(16) - to.Y, to.Z, float32(16) - from.Y}
+		return data.Vector4{from.Z, float64(16) - to.Y, to.Z, float64(16) - from.Y}
 	case data.East:
-		return data.Vector4{float32(16) - to.Z, float32(16) - to.Y, float32(16) - from.Z, float32(16) - from.Y}
+		return data.Vector4{float64(16) - to.Z, float64(16) - to.Y, float64(16) - from.Z, float64(16) - from.Y}
 	default:
 		return data.Vector4{0, 0, 16, 16}
 	}
 }
 
-func GetU(uv data.Vector4, rotationQuadrant, vertexIndex int) float32 {
+func GetU(uv data.Vector4, rotationQuadrant, vertexIndex int) float64 {
 	shifted := (vertexIndex + rotationQuadrant) % 4
 	if shifted != 0 && shifted != 1 {
 		return uv.Z
@@ -41,7 +41,7 @@ func GetU(uv data.Vector4, rotationQuadrant, vertexIndex int) float32 {
 	return uv.X
 }
 
-func GetV(uv data.Vector4, rotationQuadrant, vertexIndex int) float32 {
+func GetV(uv data.Vector4, rotationQuadrant, vertexIndex int) float64 {
 	shifted := (vertexIndex + rotationQuadrant) % 4
 	if shifted != 0 && shifted != 3 {
 		return uv.W
@@ -65,8 +65,8 @@ func CreateUvMap(faceUv data.Vector4, faceRotationDegrees int) []src.Vector2 {
 
 	m := make([]src.Vector2, 4)
 	for i := 0; i < 4; i++ {
-		u := GetU(faceUv, quadrant, i) / float32(16)
-		v := GetV(faceUv, quadrant, i) / float32(16)
+		u := GetU(faceUv, quadrant, i) / float64(16)
+		v := GetV(faceUv, quadrant, i) / float64(16)
 		m[i] = src.Vector2{X: u, Y: v}
 	}
 

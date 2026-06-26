@@ -11,10 +11,29 @@ const (
 	Down
 )
 
+func BlockFaceDirectionToString(dir BlockFaceDirection) string {
+	switch dir {
+	case North:
+		return "North"
+	case South:
+		return "South"
+	case East:
+		return "East"
+	case West:
+		return "West"
+	case Up:
+		return "Up"
+	case Down:
+		return "Down"
+	default:
+		return "Unknown"
+	}
+}
+
 type Vector3 struct {
-	X float32
-	Y float32
-	Z float32
+	X float64
+	Y float64
+	Z float64
 }
 
 func Cross(a, b Vector3) Vector3 {
@@ -41,7 +60,7 @@ func Add(a, b Vector3) Vector3 {
 	}
 }
 
-func Scale(v Vector3, s float32) Vector3 {
+func Scale(v Vector3, s float64) Vector3 {
 	return Vector3{
 		X: v.X * s,
 		Y: v.Y * s,
@@ -50,10 +69,10 @@ func Scale(v Vector3, s float32) Vector3 {
 }
 
 type Vector4 struct {
-	X float32
-	Y float32
-	Z float32
-	W float32
+	X float64
+	Y float64
+	Z float64
+	W float64
 }
 
 type BlockModelInstance struct {
@@ -80,7 +99,7 @@ type ModelElement struct {
 }
 
 type ElementRotation struct {
-	AngleInDegrees float32
+	AngleInDegrees float64
 	Origin         Vector3
 	Axis           string
 	Rescale        bool

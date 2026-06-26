@@ -98,6 +98,14 @@ func (registry *ItemRegistry) GetItemInfo(itemName string) *ItemInfo {
 	return nil
 }
 
+func (registry *ItemRegistry) TryGetModel(itemName string) (string, bool) {
+	if info, exists := registry.entries[itemName]; exists && info.Model != nil && strings.TrimSpace(*info.Model) != "" {
+		return *info.Model, true
+	}
+
+	return "", false
+}
+
 var ItemRegistryInstance = &ItemRegistry{
 	entries: make(map[string]ItemInfo),
 }

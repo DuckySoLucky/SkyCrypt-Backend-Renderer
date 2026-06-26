@@ -7,16 +7,25 @@ import (
 	"duckysolucky/gorenderer/src/assets"
 	"duckysolucky/gorenderer/src/global"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 )
 
 type TexturePackRegistry struct {
-	_packs               map[string]RegisteredResourcePack
-	_registrationSources []RegistrationSource
+	Packs               map[string]RegisteredResourcePack
+	RegistrationSources []RegistrationSource
+}
+
+func NewTexturePackRegistry() *TexturePackRegistry {
+	return &TexturePackRegistry{
+		Packs:               make(map[string]RegisteredResourcePack),
+		RegistrationSources: []RegistrationSource{},
+	}
 }
 
 type RegistrationSource struct {
@@ -42,13 +51,13 @@ func (texturePackRegistry *TexturePackRegistry) RegisterPack(directory string) (
 }
 
 func (texturePackRegistry *TexturePackRegistry) RecordRegistrationSource(source RegistrationSource) {
-	for _, existing := range texturePackRegistry._registrationSources {
+	for _, existing := range texturePackRegistry.RegistrationSources {
 		if existing == source {
 			return
 		}
 	}
 
-	texturePackRegistry._registrationSources = append(texturePackRegistry._registrationSources, source)
+	texturePackRegistry.RegistrationSources = append(texturePackRegistry.RegistrationSources, source)
 }
 
 func (texturePackRegistry *TexturePackRegistry) RegisterPackCore(directory string) RegisteredResourcePack {
@@ -101,7 +110,8 @@ func (texturePackRegistry *TexturePackRegistry) RegisterPackCore(directory strin
 			}
 
 			provider = assets.NewCatsResourceProvider(catsFile, archive.Path)
-			break
+			// Console.WriteLine($"Registered archive-backed texture pack from '{archive.Path}' (kind={archive.Kind}).");
+			// fmt.Printf("Registered archive-backed texture pack from '%s' (kind=%s).\n", archive.Path, archive.Kind)
 		case "CatsZip":
 			zipStream, err := os.Open(archive.Path)
 			if err != nil {
@@ -142,15 +152,18 @@ func (texturePackRegistry *TexturePackRegistry) RegisterPackCore(directory strin
 				panic("Failed to read pack.cats from .cats.zip: " + err.Error())
 			}
 
-			catsFile, err := assets.NewCatsFile(memoryStream.Bytes())
+			catsFile, err = assets.NewCatsFile(memoryStream.Bytes())
 			if err != nil {
 				panic("Failed to parse pack.cats from .cats.zip: " + err.Error())
 			}
 			provider = assets.NewCatsResourceProvider(catsFile, archive.Path)
-			break
+			// Console.WriteLine($"Registered archive-backed texture pack from '{archive.Path}' (kind={archive.Kind}).");
+			// fmt.Printf("Registered archive-backed texture pack from '%s' (kind=%s).\n", archive.Path, archive.Kind)
+			// fmt.Printf("catFile: %v, catProvider: %v\n ", catsFile != nil, true)
 		case "Zip":
 			provider = assets.NewZipResourceProvider(archive.Path)
-			break
+			// Console.WriteLine($"Registered archive-backed texture pack from '{archive.Path}' (kind={archive.Kind}).");
+			// fmt.Printf("Registered archive-backed texture pack from '%s' (kind=%s).\n", archive.Path, archive.Kind)
 		default:
 			panic("Unexpected archive kind: " + archive.Kind)
 		}
@@ -186,9 +199,14 @@ func (texturePackRegistry *TexturePackRegistry) RegisterPackCore(directory strin
 
 		supportsCit = metaDescriptor.SupportsCit || namespaceRoots["cit"] != "" || provider.DirectoryExists("assets/minecraft/optifine/cit")
 
+		// fmt.Printf("isCatharsisPack: %v, packFormat: %v, supportsCit: %v, mcmetaJsonForCatharsis: %v\n", isCatharsisPack, packFormat, supportsCit, mcmetaJsonForCatharsis != "")
+
 		// For catharsis packs, resolve overlay directories from embedded config
 		if isCatharsisPack && mcmetaJsonForCatharsis != "" {
 			catharsisOverlays = CatharsisPackConfig.ResolveEnabledOverlays(mcmetaJsonForCatharsis, &catharsisConfigJson, catharsisConfigOverrides, false)
+
+			// Console.WriteLine($"Detected catharsis pack with {catharsisOverlays.Count} enabled overlay(s) in '{archive.Path}'.");
+			// fmt.Printf("Detected catharsis pack with %d enabled overlay(s) in '%s'.\n", len(catharsisOverlays), archive.Path)
 
 			if len(catharsisOverlays) > 0 {
 				var overlayProviders []OverlayNamespaceProvider
@@ -320,11 +338,13 @@ func (texturePackRegistry *TexturePackRegistry) RegisterPackCore(directory strin
 		OverlayNamespaceProviders: overlayNsProvidersList,
 	}
 
-	if _, exists := texturePackRegistry._packs[resourceMeta.Id]; exists {
+	if _, exists := texturePackRegistry.Packs[resourceMeta.Id]; exists {
 		panic("A texture pack with id '" + resourceMeta.Id + "' has already been registered.")
 	}
 
-	// texturePackRegistry._packs[resourceMeta.Id] = registered
+	fmt.Printf("Registered texture pack '%s' with id '%s', version '%s', last modified %s, size %d bytes, supports CIT: %v, pack format: %v\n", resourceMeta.Name, resourceMeta.Id, resourceMeta.Version, lastWriteTimeUtc.UTC().Format(time.RFC3339), sizeBytes, supportsCit, packFormat)
+
+	texturePackRegistry.Packs[resourceMeta.Id] = registered
 
 	return registered
 }
@@ -628,36 +648,6 @@ func ComputeSha256(input string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-/*
-	public TexturePackStack BuildPackStack(IReadOnlyList<string> packIds) {
-		ArgumentNullException.ThrowIfNull(packIds);
-		if (packIds.Count == 0) {
-			return new TexturePackStack(Array.Empty<RegisteredResourcePack>(), Array.Empty<PackOverlayRoot>(),
-				"vanilla");
-		}
-
-		var ordered = new List<RegisteredResourcePack>(packIds.Count);
-		foreach (var packId in packIds) {
-			if (!_packs.TryGetValue(packId, out var pack)) {
-				throw new KeyNotFoundException($"Unknown texture pack id '{packId}'.");
-			}
-
-			ordered.Add(pack);
-		}
-
-		var overlayRoots = new List<PackOverlayRoot>();
-		foreach (var pack in ordered) {
-			foreach (var overlayPath in pack.EnumerateOverlayRootPaths()) {
-				overlayRoots.Add(new PackOverlayRoot(overlayPath, pack.Id));
-			}
-		}
-
-		var fingerprintInput = string.Join('|', ordered.Select(static pack => $"{pack.Id}:{pack.Fingerprint}"));
-		var stackFingerprint = ComputeSha256("packstack:" + fingerprintInput);
-
-		return new TexturePackStack(ordered, overlayRoots, stackFingerprint);
-	}
-*/
 func (texturePackRegistry *TexturePackRegistry) BuildPackStack(packIds []string) *TexturePackStack {
 	if packIds == nil {
 		panic("packIds cannot be null")
@@ -673,7 +663,7 @@ func (texturePackRegistry *TexturePackRegistry) BuildPackStack(packIds []string)
 
 	var ordered []RegisteredResourcePack
 	for _, packId := range packIds {
-		pack, exists := texturePackRegistry._packs[packId]
+		pack, exists := texturePackRegistry.Packs[packId]
 		if !exists {
 			panic("Unknown texture pack id '" + packId + "'.")
 		}
@@ -708,4 +698,75 @@ func (texturePackRegistry *TexturePackRegistry) BuildPackStack(packIds []string)
 		OverlayRoots: overlayRoots,
 		Fingerprint:  stackFingerprint,
 	}
+}
+
+func (texturePackRegistry *TexturePackRegistry) RegisterAllPacks(rootDirectory string, searchRecursively bool) []RegisteredResourcePack {
+	results, normalizedRoot := texturePackRegistry.RegisterAllPacksCore(rootDirectory, searchRecursively)
+	if rootDirectory != "" {
+		texturePackRegistry.RecordRegistrationSource(RegistrationSource{
+			Path:               *normalizedRoot,
+			SearchRecursively:  searchRecursively,
+			RegisterSinglePack: false,
+		})
+	}
+
+	return results
+}
+
+func (texturePackRegistry *TexturePackRegistry) RegisterAllPacksCore(rootDirectory string, searchRecursively bool) ([]RegisteredResourcePack, *string) {
+	var normalizedRoot *string
+
+	if rootDirectory == "" {
+		return []RegisteredResourcePack{}, normalizedRoot
+	}
+
+	fullRoot, err := filepath.Abs(rootDirectory)
+	if err != nil {
+		fmt.Printf("Failed to resolve absolute path for '%s': %s\n", rootDirectory, err.Error())
+
+		return []RegisteredResourcePack{}, normalizedRoot
+	}
+
+	if _, err := os.Stat(fullRoot); os.IsNotExist(err) {
+		return []RegisteredResourcePack{}, normalizedRoot
+	}
+
+	normalizedRoot = &fullRoot
+
+	var results []RegisteredResourcePack
+	if _, err := os.Stat(filepath.Join(fullRoot, "meta.json")); err == nil {
+		pack := texturePackRegistry.RegisterPackCore(fullRoot)
+		results = append(results, pack)
+	}
+
+	var candidates []string
+	err = filepath.Walk(fullRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			fmt.Printf("Failed to access path '%s': %s\n", path, err.Error())
+			return nil
+		}
+
+		if info.IsDir() && path != fullRoot {
+			if _, err := os.Stat(filepath.Join(path, "meta.json")); err == nil {
+				candidates = append(candidates, path)
+			}
+			if !searchRecursively {
+				return filepath.SkipDir
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		fmt.Printf("Failed to enumerate directories under '%s': %s\n", fullRoot, err.Error())
+		return results, normalizedRoot
+	}
+
+	for _, candidate := range candidates {
+		pack := texturePackRegistry.RegisterPackCore(candidate)
+		if pack.Id != "" {
+			results = append(results, pack)
+		}
+	}
+
+	return results, normalizedRoot
 }

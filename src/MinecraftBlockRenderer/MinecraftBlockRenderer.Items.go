@@ -100,7 +100,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderGuiItemInternal(ite
 	var postScale *float64
 	finalizeGuiResult := func(img *image.RGBA) *image.RGBA {
 		if capture != nil {
-			capture.FinalOptions = *options
+			capture.FinalOptions = options
 		}
 
 		if postScale != nil {
@@ -120,6 +120,9 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderGuiItemInternal(ite
 	}
 
 	model, candidates, resolvedModelName := _minecraftBlockRenderer.ResolveItemModel(normalizedItemKey, itemInfo, *options)
+	// Console.WriteLine($"Resolved model for item '{itemName}': '{model?.Name}' with candidates [{string.Join(", ", modelCandidates)}].");
+	fmt.Printf("Resolved model for item '%s': '%v' with candidates [%s].\n", itemName, model, strings.Join(candidates, ", "))
+
 	if capture != nil {
 		capture.Model = model
 		capture.ModelCandidates = candidates
@@ -151,20 +154,20 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderGuiItemInternal(ite
 		}
 	}
 
-	fmt.Printf("\nnormalizedItemKey: %v\nitemInfo: %v\nmodel: %v\noptions: %v\n", normalizedItemKey, itemInfo, model, options)
+	// fmt.Printf("\nnormalizedItemKey: %v\nitemInfo: %v\nmodel: %v\noptions: %v\n", normalizedItemKey, itemInfo, model, options)
 
-	flatRender := _minecraftBlockRenderer.TryRenderGuiTextureLayers(normalizedItemKey, itemInfo, model, *options)
+	flatRender := _minecraftBlockRenderer.TryRenderGuiTextureLayers(itemName, itemInfo, model, *options)
 	if flatRender != nil {
 		return finalizeGuiResult(flatRender)
 	}
 
-	bedRender := _minecraftBlockRenderer.TryRenderBedItem(normalizedItemKey, model, *options)
+	bedRender := _minecraftBlockRenderer.TryRenderBedItem(itemName, model, *options)
 	if bedRender != nil {
 		return finalizeGuiResult(bedRender)
 	}
 
 	if _minecraftBlockRenderer.HasExplicitFlatHeadOverride(model, candidates, *options) {
-		headComposite := _minecraftBlockRenderer.RenderPlayerHead(normalizedItemKey, model, candidates, *options)
+		headComposite := _minecraftBlockRenderer.RenderPlayerHead(itemName, model, candidates, *options)
 		if headComposite != nil {
 			return finalizeGuiResult(headComposite)
 		}
@@ -173,7 +176,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderGuiItemInternal(ite
 
 	if model != nil && _minecraftBlockRenderer.IsBillboardModel(model) {
 		billboardTextures := _minecraftBlockRenderer.CollectBillboardTextures(model, nil)
-		rendered := _minecraftBlockRenderer.TryRenderFlatItemFromIdentifiers(billboardTextures, model, *options, normalizedItemKey)
+		rendered := _minecraftBlockRenderer.TryRenderFlatItemFromIdentifiers(billboardTextures, model, *options, itemName)
 		if rendered != nil {
 			return finalizeGuiResult(rendered)
 		}
@@ -186,7 +189,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderGuiItemInternal(ite
 		}
 	}
 
-	renderBlockEntityFallback := _minecraftBlockRenderer.TryRenderBlockEntityFallback(normalizedItemKey, itemInfo, model, candidates, *options)
+	renderBlockEntityFallback := _minecraftBlockRenderer.TryRenderBlockEntityFallback(itemName, itemInfo, model, candidates, *options)
 	if renderBlockEntityFallback != nil {
 		return finalizeGuiResult(renderBlockEntityFallback)
 	}
@@ -719,8 +722,8 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderPlayerHead(itemName
 
 	yaw -= 180.0
 
-	headOptions := src.NewRenderOptions(options.Size, float32(yaw), float32(pitch), float32(roll))
-	headOptions.PerspectiveAmount = float32(options.PerspectiveAmount)
+	headOptions := src.NewRenderOptions(options.Size, float64(yaw), float64(pitch), float64(roll))
+	headOptions.PerspectiveAmount = float64(options.PerspectiveAmount)
 
 	rendered := headOptions.RenderHead(headOptions, *skinSource)
 
@@ -957,7 +960,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryLoadSkinFromDisk(norma
 
 	imageFromDisk, err := data.LoadImageFromStream(file)
 	if err == nil {
-		return imageFromDisk, true
+		return *imageFromDisk, true
 	}
 
 	_ = os.Remove(*path)
@@ -980,8 +983,8 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) DownloadPlayerSkin(normal
 		return image.RGBA{}, err
 	}
 
-	_minecraftBlockRenderer.TryPersistSkin(normalizedURL, &decoded)
-	return decoded, nil
+	_minecraftBlockRenderer.TryPersistSkin(normalizedURL, decoded)
+	return *decoded, nil
 }
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryPersistSkin(normalizedURL string, skin *image.RGBA) {
@@ -1283,7 +1286,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryRenderFlatItemFromIden
 		return nil
 	}
 
-	fmt.Printf("\navailable: %v\noptions: %v\ntintContext: %v\n", available, options, tintContext)
+	// fmt.Printf("\navailable: %v\noptions: %v\ntintContext: %v\n", available, options, tintContext)
 	rendered, err := _minecraftBlockRenderer.RenderFlatItem(available, options, tintContext)
 	if err != nil {
 		return nil
@@ -1359,18 +1362,18 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderFlatItem(layerTextu
 		hasExplicitPerLayerTint := explicitItemData != nil && explicitItemData.AdditionalLayerTints != nil && explicitItemData.AdditionalLayerTints[layerIndex] != nil
 		hasPrimaryExplicitTint := layerIndex == primaryTintLayerIndex && explicitItemData != nil && explicitItemData.Layer0Tint != nil
 		skipContextTint := layerTint != nil || hasExplicitPerLayerTint || hasPrimaryExplicitTint
-		fmt.Printf("ResolveItemLayerTexture: %v %v %v\n", textureId, tintContext, skipContextTint)
+		// fmt.Printf("ResolveItemLayerTexture: %v %v %v\n", textureId, tintContext, skipContextTint)
 		texture := _minecraftBlockRenderer.ResolveItemLayerTexture(textureId, tintContext, skipContextTint)
 
 		scale := math.Min(float64(options.Size)/float64(texture.Bounds().Dx()), float64(options.Size)/float64(texture.Bounds().Dy()))
-		fmt.Printf("Scale: %f\n", scale)
+		// fmt.Printf("Scale: %f\n", scale)
 		targetWidth := int(math.Max(1, math.Round(float64(texture.Bounds().Dx())*scale)))
 		targetHeight := int(math.Max(1, math.Round(float64(texture.Bounds().Dy())*scale)))
 
-		fmt.Printf("targetWidth, targetHeight: %d %d\n", targetWidth, targetHeight)
+		// fmt.Printf("targetWidth, targetHeight: %d %d\n", targetWidth, targetHeight)
 
 		resized := image.NewRGBA(image.Rect(0, 0, targetWidth, targetHeight))
-		draw.ApproxBiLinear.Scale(resized, resized.Bounds(), texture, texture.Bounds(), draw.Over, nil)
+		draw.NearestNeighbor.Scale(resized, resized.Bounds(), texture, texture.Bounds(), draw.Over, nil)
 
 		if layerTint != nil {
 			_minecraftBlockRenderer.ApplyLayerTint(resized, *layerTint)
@@ -1943,21 +1946,21 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) CloneDisplayDictionary(so
 	}
 
 	for key, transform := range source.Display {
-		var rotation []float32
+		var rotation []float64
 		if transform.Rotation != nil {
-			rotation = make([]float32, len(*transform.Rotation))
+			rotation = make([]float64, len(*transform.Rotation))
 			copy(rotation, *transform.Rotation)
 		}
 
-		var translation []float32
+		var translation []float64
 		if transform.Translation != nil {
-			translation = make([]float32, len(*transform.Translation))
+			translation = make([]float64, len(*transform.Translation))
 			copy(translation, *transform.Translation)
 		}
 
-		var scale []float32
+		var scale []float64
 		if transform.Scale != nil {
-			scale = make([]float32, len(*transform.Scale))
+			scale = make([]float64, len(*transform.Scale))
 			copy(scale, *transform.Scale)
 		}
 
@@ -1974,42 +1977,42 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) CloneDisplayDictionary(so
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) AdjustBedGuiTransform(display map[string]*data.TransformDefinition) {
 	const rotationAdjustment = 180.0
 	const scaleMultiplier = 0.9
-	defaultScale := []float32{0.48, 0.48, 0.48}
-	translationAdjustment := []float32{-2.5, -2.75, 0}
+	defaultScale := []float64{0.48, 0.48, 0.48}
+	translationAdjustment := []float64{-2.5, -2.75, 0}
 
 	gui, found := display["gui"]
 	if !found {
 		display["gui"] = &data.TransformDefinition{
-			Rotation:    &[]float32{30, 160 + rotationAdjustment, 0},
+			Rotation:    &[]float64{30, 160 + rotationAdjustment, 0},
 			Translation: &translationAdjustment,
 			Scale:       &defaultScale,
 		}
 		return
 	}
 
-	rotationArray := make([]float32, 3)
+	rotationArray := make([]float64, 3)
 	if gui.Rotation != nil {
 		copy(rotationArray, *gui.Rotation)
 	}
-	rotationArray[1] = float32(math.Mod(float64(rotationArray[1])+rotationAdjustment, 360))
+	rotationArray[1] = float64(math.Mod(float64(rotationArray[1])+rotationAdjustment, 360))
 
-	var translationArray []float32
+	var translationArray []float64
 	if gui.Translation == nil || len(*gui.Translation) == 0 {
-		translationArray = make([]float32, 3)
+		translationArray = make([]float64, 3)
 	} else {
-		translationArray = make([]float32, len(*gui.Translation))
+		translationArray = make([]float64, len(*gui.Translation))
 		copy(translationArray, *gui.Translation)
 	}
 	for i := 0; i < 3; i++ {
 		translationArray[i] += translationAdjustment[i]
 	}
 
-	var scaleArray []float32
+	var scaleArray []float64
 	if gui.Scale == nil || len(*gui.Scale) == 0 {
-		scaleArray = make([]float32, len(defaultScale))
+		scaleArray = make([]float64, len(defaultScale))
 		copy(scaleArray, defaultScale)
 	} else {
-		scaleArray = make([]float32, len(*gui.Scale))
+		scaleArray = make([]float64, len(*gui.Scale))
 		copy(scaleArray, *gui.Scale)
 		for i := 0; i < len(scaleArray); i++ {
 			scaleArray[i] *= scaleMultiplier
@@ -2312,4 +2315,47 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) EnumerateTextureNameVaria
 	candidates = append(candidates, fmt.Sprintf("minecraft:block/%s", textureKey))
 	candidates = append(candidates, fmt.Sprintf("block/%s", textureKey))
 	return candidates
+}
+
+// public RenderedResource RenderGuiItemWithResourceId(string itemName,
+//
+//		BlockRenderOptions? options = null) {
+//		ArgumentException.ThrowIfNullOrWhiteSpace(itemName);
+//		var effectiveOptions = options ?? BlockRenderOptions.Default;
+//		var renderer = ResolveRendererForOptions(effectiveOptions, out var forwardedOptions);
+//		var capture = new ItemRenderCapture();
+//		var image = renderer.RenderGuiItemInternal(itemName, forwardedOptions, capture);
+//		var resourceTarget = string.IsNullOrWhiteSpace(capture.OriginalTarget)
+//			? itemName.Trim()
+//			: capture.OriginalTarget;
+//		var idOptions = capture.FinalOptions ?? forwardedOptions;
+//		var resourceId = renderer.ComputeResourceIdInternal(resourceTarget, idOptions, capture.ToResolution());
+//		return new RenderedResource(image, resourceId);
+//	}
+func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderGuiItemWithResourceId(itemName string, options *BlockRenderOptions) *RenderedResource {
+	effectiveOptions := options
+	if effectiveOptions == nil {
+		opt := DefaultBlockRenderOptions()
+		effectiveOptions = &opt
+	}
+
+	rendered, forwardedOptions := _minecraftBlockRenderer.ResolveRendererForOptions(*effectiveOptions)
+	capture := ItemRenderCapture{}
+
+	// fmt.Printf("Rendering GUI item: %s with options: %+v %+v\n", itemName, forwardedOptions, capture)
+	image := rendered.RenderGuiItemInternal(itemName, &forwardedOptions, &capture)
+	resourceTarget := strings.TrimSpace(itemName)
+	if strings.TrimSpace(capture.OriginalTarget) != "" {
+		resourceTarget = capture.OriginalTarget
+	}
+	idOptions := forwardedOptions
+	if capture.FinalOptions != nil {
+		idOptions = *capture.FinalOptions
+	}
+	resourceId := rendered.ComputeResourceIdInternal(resourceTarget, idOptions, capture.ToResolution())
+	return &RenderedResource{
+		Image:      image,
+		ResourceId: *resourceId,
+	}
+
 }

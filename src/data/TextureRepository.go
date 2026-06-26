@@ -9,6 +9,7 @@ import (
 	"image/color"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -33,13 +34,15 @@ func NewTextureRepository(dataRoot string, embeddedTextureFile *string, overlayR
 	_textureRepository := &TextureRepository{
 		_assetNamespaces: assetNamespaces,
 		_cache:           make(map[string]image.RGBA),
+		_embedded:        make(map[string]string),
+		_animationCache:  make(map[string]TextureAnimation),
 	}
 
 	_textureRepository._sources = _textureRepository.BuildSourceList(dataRoot, overlayRoots, &assetNamespaces)
 	_textureRepository._missingTexture = _textureRepository.CreateMissingTexture()
 
 	if trimPaletteColors, found := TryLoadTrimPaletteColors(_textureRepository); found {
-		fmt.Printf("Loaded trim palette with %d colors\n", len(trimPaletteColors))
+		// fmt.Printf("Loaded trim palette with %d colors\n", len(trimPaletteColors))
 		_textureRepository._trimPaletteLength = len(trimPaletteColors)
 		_textureRepository._trimPaletteLookup = make(map[int]int)
 		for i, color := range trimPaletteColors {
@@ -70,7 +73,7 @@ func NewTextureRepository(dataRoot string, embeddedTextureFile *string, overlayR
 			}
 
 			for _, entry := range entries {
-				if strings.TrimSpace(*entry.Texture) != "" {
+				if entry.Texture != nil && strings.TrimSpace(*entry.Texture) != "" {
 					key := _textureRepository.NormalizeTextureId(entry.Name)
 					_textureRepository._embedded[key] = *entry.Texture
 				}
@@ -82,7 +85,7 @@ func NewTextureRepository(dataRoot string, embeddedTextureFile *string, overlayR
 }
 
 func (_textureRepository *TextureRepository) GetTexture(textureId string) *image.RGBA {
-	fmt.Printf("\nGetTexture: %v\n", textureId)
+	// fmt.Printf("\nGetTexture: %v\n", textureId)
 	if textureId == "" {
 		return &_textureRepository._missingTexture
 	}
@@ -103,7 +106,7 @@ func (_textureRepository *TextureRepository) GetTexture(textureId string) *image
 
 	_textureRepository._cache[normalizedTextureId] = loadedTexture
 
-	fmt.Printf("Returning image with height and width of %d and %d\n", loadedTexture.Bounds().Dy(), loadedTexture.Bounds().Dx())
+	// fmt.Printf("Returning image with height and width of %d and %d\n", loadedTexture.Bounds().Dy(), loadedTexture.Bounds().Dx())
 	return &loadedTexture
 }
 
@@ -122,35 +125,45 @@ func (_textureRepository *TextureRepository) TryGetTexture(textureId string) (*i
 
 func (_textureRepository *TextureRepository) LoadTextureInternal(normalizedTextureId string) image.RGBA {
 
-	fmt.Printf("normalizedTextureId: %s\n", normalizedTextureId)
+	// fmt.Printf("normalizedTextureId: %s\n", normalizedTextureId)
 
 	namespaceName, pathWithinNamespace := _textureRepository.ParseNamespace(normalizedTextureId)
 	logicalPaths := EnumerateLogicalPaths(pathWithinNamespace)
 
-	fmt.Printf("Parsed namespace: %s, pathWithinNamespace: %s\n", namespaceName, pathWithinNamespace)
+	// fmt.Printf("Parsed namespace: %s, pathWithinNamespace: %s\n", namespaceName, pathWithinNamespace)
 
 	// Iterate sources in reverse order (High Priority -> Low Priority)
 	for i := len(_textureRepository._sources) - 1; i >= 0; i-- {
 		source := _textureRepository._sources[i]
 		for _, logicalPath := range logicalPaths {
-			fmt.Printf("Trying to resolve texture for namespace: %s, logicalPath: %s\n", namespaceName, logicalPath)
+			// fmt.Printf("Trying to resolve texture for namespace: %s, logicalPath: %s\n", namespaceName, logicalPath)
 			if resource, found := source.TryResolve(namespaceName, logicalPath); found {
-				fmt.Printf("Found resource for namespace: %s, logicalPath: %s, attempting to load image\n", namespaceName, logicalPath)
+				// fmt.Printf("Found resource for namespace: %s, logicalPath: %s, attempting to load image\n", namespaceName, logicalPath)
 
-				stream, err := resource.OpenImage()
+				loadedImage, err := resource.OpenImage()
 				if err != nil {
-					continue
-				}
-				loadedTexture, err := LoadImageFromStream(stream)
-				if closeErr := stream.Close(); closeErr != nil {
-					fmt.Printf("warning: failed to close stream for texture resource: %v\n", closeErr)
-				}
-				if err != nil {
-					continue
+					fmt.Printf("Failed to open image stream for %s: %v\n", normalizedTextureId, err)
 				}
 
-				fmt.Printf("Loaded texture for %s from source, processing animation if needed\n", normalizedTextureId)
-				return _textureRepository.ProcessAnimatedTexture(normalizedTextureId, loadedTexture, resource.OpenMcmeta)
+				// write loadedImage as test.png for debugging
+				// if loadedImage != nil {
+				// 	testFileName := fmt.Sprintf("debug_texture_%d.png", i)
+				// 	testFile, err := os.Create(testFileName)
+				// 	if err == nil {
+				// 		err = png.Encode(testFile, loadedImage)
+				// 		if err != nil {
+				// 			fmt.Printf("Failed to write debug image for %s: %v\n", normalizedTextureId, err)
+				// 		} else {
+				// 			// fmt.Printf("Wrote debug image for %s to %s\n", normalizedTextureId, testFileName)
+				// 		}
+				// 		testFile.Close()
+				// 	} else {
+				// 		fmt.Printf("Failed to create debug image file for %s: %v\n", normalizedTextureId, err)
+				// 	}
+				// }
+
+				// fmt.Printf("Loaded texture for %s from source, processing animation if needed\n", normalizedTextureId)
+				return _textureRepository.ProcessAnimatedTexture(normalizedTextureId, *loadedImage, resource.OpenMcmeta)
 			}
 		}
 	}
@@ -178,7 +191,7 @@ func (_textureRepository *TextureRepository) LoadTextureInternal(normalizedTextu
 		return generated
 	}
 
-	fmt.Printf("Failed to load texture for %s, returning missing texture\n", normalizedTextureId)
+	// fmt.Printf("Failed to load texture for %s, returning missing texture\n", normalizedTextureId)
 	return _textureRepository._missingTexture
 }
 
@@ -300,8 +313,8 @@ type TextureSource interface {
 }
 
 type ResolvedTextureResource struct {
-	OpenImage  func() (io.ReadCloser, error)
-	OpenMcmeta func() (io.ReadCloser, error)
+	OpenImage  func() (*image.RGBA, error)
+	OpenMcmeta *func() (io.ReadCloser, error)
 }
 
 func (_textureRepository *TextureRepository) BuildSourceList(primaryRoot string, overlayRoots []string, assetNamespaces *assets.AssetNamespaceRegistry) []TextureSource {
@@ -310,51 +323,60 @@ func (_textureRepository *TextureRepository) BuildSourceList(primaryRoot string,
 	if assetNamespaces != nil {
 		for _, namespace := range assetNamespaces.GetSources() {
 			sources = append(sources, NewRegistryTextureSource(namespace, assetNamespaces))
-			fmt.Printf("Adding registry texture source for sourceId: %s\n", namespace)
-			// Dump roots for this sourceId for diagnostics
-			roots := assetNamespaces.GetRoots("minecraft", namespace)
-			for _, r := range roots {
-				providerType := "<nil>"
-				if r.Provider != nil {
-					providerType = "provider"
-				}
-				fmt.Printf("  root: Namespace=%s Path=%s SourceId=%s IsVanilla=%v Provider=%s\n", r.Namespace, r.Path, r.SourceId, r.IsVanilla, providerType)
-			}
 		}
 	} else {
 		// Fallback: Treat each root as a separate source to preserve order
-		unorderedRoots := make(map[string]struct{})
+		orderedRoots := make([]string, 0)
 
-		tryAddDirectory := func(root string) {
-			if strings.TrimSpace(root) == "" {
+		tryAddDirectory := func(candidate string) {
+			if strings.TrimSpace(candidate) == "" {
 				return
 			}
 
-			if _, err := os.Stat(root); os.IsNotExist(err) {
-				fmt.Printf("Warning: Texture source directory does not exist: %s\n", root)
+			fullPath, err := filepath.Abs(candidate)
+			if err != nil {
 				return
 			}
 
-			if _, exists := unorderedRoots[root]; !exists {
-				unorderedRoots[root] = struct{}{}
+			if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+				return
 			}
 
-			textureSubdirectory := root + "/textures"
+			// Check if already exists (case-insensitive)
+			containsPath := false
+			for _, existing := range orderedRoots {
+				if strings.EqualFold(existing, fullPath) {
+					containsPath = true
+					break
+				}
+			}
+			if !containsPath {
+				orderedRoots = append(orderedRoots, fullPath)
+			}
+
+			textureSubdirectory := filepath.Join(fullPath, "textures")
 			if _, err := os.Stat(textureSubdirectory); err == nil {
-				if _, exists := unorderedRoots[textureSubdirectory]; !exists {
-					unorderedRoots[textureSubdirectory] = struct{}{}
+				// Check if already exists (case-insensitive)
+				containsPath = false
+				for _, existing := range orderedRoots {
+					if strings.EqualFold(existing, textureSubdirectory) {
+						containsPath = true
+						break
+					}
+				}
+				if !containsPath {
+					orderedRoots = append(orderedRoots, textureSubdirectory)
 				}
 			}
 		}
 
 		tryAddDirectory(primaryRoot)
-		for _, overlayRoot := range overlayRoots {
-			tryAddDirectory(overlayRoot)
+		for _, overlay := range overlayRoots {
+			tryAddDirectory(overlay)
 		}
 
-		for root := range unorderedRoots {
+		for _, root := range orderedRoots {
 			sources = append(sources, NewDirectoryTextureSource(root))
-			fmt.Printf("Adding directory texture source for root: %s\n", root)
 		}
 	}
 
@@ -380,44 +402,96 @@ func (source *RegistryTextureSource) TryResolve(namespaceName string, relativePa
 	}
 
 	withExtension := relativePath + ".png"
-	// mcmetaExtension := withExtension + ".mcmeta"
+	mcmetaExtension := withExtension + ".mcmeta"
+
+	// fmt.Printf("imgPath: %s\nmetaPath: %s\n\n", withExtension, mcmetaExtension)
+
 	for _, root := range roots {
-		provider := root.Provider
+		provider := *root.Provider
 		if provider != nil {
 			if provider.FileExists(withExtension) {
 				imgPath := withExtension
 				metaPath := mcmetaExtension
-				resource := ResolvedTextureResource{
-					OpenImage: func() (io.ReadCloser, error) {
-						return provider.OpenRead(imgPath)
-					},
-					OpenMcmeta: func() (io.ReadCloser, error) {
-						if provider.FileExists(metaPath) {
-							return provider.OpenRead(metaPath)
-						}
-						return nil, nil
-					},
+
+				var openMcmeta *func() (io.ReadCloser, error)
+				if provider.FileExists(metaPath) {
+					mc := func() (io.ReadCloser, error) {
+						return provider.OpenRead(metaPath)
+					}
+					openMcmeta = &mc
 				}
+
+				resource := ResolvedTextureResource{
+					OpenImage: func() (*image.RGBA, error) {
+						stream, err := provider.OpenRead(imgPath)
+						if err != nil {
+							return nil, err
+						}
+
+						img, _, err := image.Decode(stream)
+						if err != nil {
+							stream.Close()
+							return nil, err
+						}
+
+						bounds := img.Bounds()
+						rgbaBounds := image.Rect(0, 0, bounds.Dx(), bounds.Dy())
+						rgbaImg := image.NewRGBA(rgbaBounds)
+						for y := 0; y < rgbaBounds.Dy(); y++ {
+							for x := 0; x < rgbaBounds.Dx(); x++ {
+								rgbaImg.Set(x, y, img.At(bounds.Min.X+x, bounds.Min.Y+y))
+							}
+						}
+
+						stream.Close()
+						return rgbaImg, nil
+					},
+					OpenMcmeta: openMcmeta,
+				}
+
 				return resource, true
 			}
 
 			continue
 		}
 
+		fmt.Printf("-----------------FALLBACK!\n")
+		// Fallback: raw filesystem path
 		candidate := root.Path + "/" + strings.ReplaceAll(withExtension, "/", string(os.PathSeparator))
-		fmt.Print("\n\nCandidate: " + candidate + "\n")
 		if _, err := os.Stat(candidate); err == nil {
 			path := candidate
+			mc := func() (io.ReadCloser, error) {
+				if _, err := os.Stat(path + ".mcmeta"); err == nil {
+					return os.Open(path + ".mcmeta")
+				}
+				return nil, nil
+			}
 			resource := ResolvedTextureResource{
-				OpenImage: func() (io.ReadCloser, error) {
-					return os.Open(path)
-				},
-				OpenMcmeta: func() (io.ReadCloser, error) {
-					if _, err := os.Stat(path + ".mcmeta"); err == nil {
-						return os.Open(path + ".mcmeta")
+				OpenImage: func() (*image.RGBA, error) {
+					imgFile, err := os.Open(path)
+					if err != nil {
+						return nil, err
 					}
-					return nil, nil
+
+					img, _, err := image.Decode(imgFile)
+					if err != nil {
+						imgFile.Close()
+						return nil, err
+					}
+
+					bounds := img.Bounds()
+					rgbaBounds := image.Rect(0, 0, bounds.Dx(), bounds.Dy())
+					rgbaImg := image.NewRGBA(rgbaBounds)
+					for y := 0; y < rgbaBounds.Dy(); y++ {
+						for x := 0; x < rgbaBounds.Dx(); x++ {
+							rgbaImg.Set(x, y, img.At(bounds.Min.X+x, bounds.Min.Y+y))
+						}
+					}
+
+					imgFile.Close()
+					return rgbaImg, nil
 				},
+				OpenMcmeta: &mc,
 			}
 			return resource, true
 		}
@@ -441,16 +515,38 @@ func (source *DirectoryTextureSource) TryResolve(namespaceName string, relativeP
 	candidate := source._root + "/" + withExtension
 	if _, err := os.Stat(candidate); err == nil {
 		path := candidate
+		mc := func() (io.ReadCloser, error) {
+			if _, err := os.Stat(path + ".mcmeta"); err == nil {
+				return os.Open(path + ".mcmeta")
+			}
+			return nil, nil
+		}
 		resource := ResolvedTextureResource{
-			OpenImage: func() (io.ReadCloser, error) {
-				return os.Open(path)
-			},
-			OpenMcmeta: func() (io.ReadCloser, error) {
-				if _, err := os.Stat(path + ".mcmeta"); err == nil {
-					return os.Open(path + ".mcmeta")
+			OpenImage: func() (*image.RGBA, error) {
+				imgFile, err := os.Open(path)
+				if err != nil {
+					return nil, err
 				}
-				return nil, nil
+
+				img, _, err := image.Decode(imgFile)
+				if err != nil {
+					imgFile.Close()
+					return nil, err
+				}
+
+				bounds := img.Bounds()
+				rgbaBounds := image.Rect(0, 0, bounds.Dx(), bounds.Dy())
+				rgbaImg := image.NewRGBA(rgbaBounds)
+				for y := 0; y < rgbaBounds.Dy(); y++ {
+					for x := 0; x < rgbaBounds.Dx(); x++ {
+						rgbaImg.Set(x, y, img.At(bounds.Min.X+x, bounds.Min.Y+y))
+					}
+				}
+
+				imgFile.Close()
+				return rgbaImg, nil
 			},
+			OpenMcmeta: &mc,
 		}
 		return resource, true
 	}
@@ -460,17 +556,7 @@ func (source *DirectoryTextureSource) TryResolve(namespaceName string, relativeP
 
 func TryLoadTrimPaletteColors(_textureRepository *TextureRepository) ([]color.RGBA, bool) {
 	for _, resource := range _textureRepository.EnumerateResolvedResources("trims/color_palettes/trim_palette") {
-		stream, err := resource.OpenImage()
-		if err != nil {
-			continue
-		}
-		defer func() {
-			if closeErr := stream.Close(); closeErr != nil {
-				fmt.Printf("warning: failed to close stream for trim palette resource: %v\n", closeErr)
-			}
-		}()
-
-		img, err := LoadImageFromStream(stream)
+		img, err := resource.OpenImage()
 		if err != nil {
 			continue
 		}
@@ -492,23 +578,6 @@ func TryLoadTrimPaletteColors(_textureRepository *TextureRepository) ([]color.RG
 	}
 
 	return nil, false
-}
-
-func LoadImageFromStream(stream io.ReadCloser) (image.RGBA, error) {
-	img, _, err := image.Decode(stream)
-	if err != nil {
-		return image.RGBA{}, err
-	}
-
-	bounds := img.Bounds()
-	rgbaImg := image.NewRGBA(bounds)
-	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			rgbaImg.Set(x, y, img.At(x, y))
-		}
-	}
-
-	return *rgbaImg, nil
 }
 
 func (_textureRepository *TextureRepository) EnumerateResolvedResources(normalized string) []ResolvedTextureResource {
@@ -545,23 +614,13 @@ func (_textureRepository *TextureRepository) FindColormapRoot() *string {
 
 func (_textureRepository *TextureRepository) TryLoadColormapTexture(textureRelativePath string) (*image.RGBA, bool) {
 	for i := len(_textureRepository._sources) - 1; i >= 0; i-- {
-		if resource, found := _textureRepositor_textureRepository._sources[i].TryResolve("minecraft", textureRelativePath); found {
-			stream, err := resource.OpenImage()
-			if err != nil {
-				continue
-			}
-			defer func() {
-				if closeErr := stream.Close(); closeErr != nil {
-					fmt.Printf("warning: failed to close stream for colormap resource: %v\n", closeErr)
-				}
-			}()
-
-			img, err := LoadImageFromStream(stream)
+		if resource, found := _textureRepository._sources[i].TryResolve("minecraft", textureRelativePath); found {
+			img, err := resource.OpenImage()
 			if err != nil {
 				continue
 			}
 
-			return &img, true
+			return img, true
 		}
 	}
 
@@ -573,9 +632,10 @@ type TextureContentEntry struct {
 	Texture *string
 }
 
-func (_textureRepository *TextureRepository) ProcessAnimatedTexture(normalizedKey string, spriteSheet image.RGBA, openMcmeta func() (io.ReadCloser, error)) image.RGBA {
+func (_textureRepository *TextureRepository) ProcessAnimatedTexture(normalizedKey string, spriteSheet image.RGBA, openMcmeta *func() (io.ReadCloser, error)) image.RGBA {
 	animation := TryBuildTextureAnimation(spriteSheet, openMcmeta)
 	if animation == nil || len(animation.Frames) == 0 {
+		// fmt.Printf("Loaded static texture: %s\n", normalizedKey)
 		return spriteSheet
 	}
 
@@ -660,12 +720,13 @@ func (animation *TextureAnimation) GetFrameAtTime(elapsedMilliseconds int64) (Te
 	return animation.Frames[len(animation.Frames)-1], false
 }
 
-func TryBuildTextureAnimation(spriteSheet image.RGBA, openMcmeta func() (io.ReadCloser, error)) *TextureAnimation {
+func TryBuildTextureAnimation(spriteSheet image.RGBA, openMcmeta *func() (io.ReadCloser, error)) *TextureAnimation {
 	if openMcmeta == nil {
+		// fmt.Printf("No mcmeta reader provided, cannot build texture animation.\n")
 		return nil
 	}
 
-	stream, err := openMcmeta()
+	stream, err := (*openMcmeta)()
 	if err != nil {
 		return nil
 	}
@@ -689,6 +750,7 @@ func TryBuildTextureAnimation(spriteSheet image.RGBA, openMcmeta func() (io.Read
 	}
 
 	if err := global.JSON.NewDecoder(stream).Decode(&metaData); err != nil {
+		fmt.Printf("Failed to decode animation metadata JSON: %v\n", err)
 		return nil
 	}
 
@@ -762,20 +824,21 @@ func DecodeDataUri(dataUri string) (image.RGBA, error) {
 	const prefix = "data:image/png;base64,"
 	if strings.HasPrefix(strings.ToLower(dataUri), prefix) {
 		base64Data := dataUri[len(prefix):]
-		bytes, err := global.Base64.DecodeString(base64Data)
+		decodedBytes, err := global.Base64.DecodeString(base64Data)
 		if err != nil {
 			return image.RGBA{}, err
 		}
-		img, _, err := image.Decode(strings.NewReader(string(bytes)))
+		img, _, err := image.Decode(bytes.NewReader(decodedBytes))
 		if err != nil {
 			return image.RGBA{}, err
 		}
 
 		bounds := img.Bounds()
-		rgbaImg := image.NewRGBA(bounds)
-		for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-			for x := bounds.Min.X; x < bounds.Max.X; x++ {
-				rgbaImg.Set(x, y, img.At(x, y))
+		rgbaBounds := image.Rect(0, 0, bounds.Dx(), bounds.Dy())
+		rgbaImg := image.NewRGBA(rgbaBounds)
+		for y := 0; y < rgbaBounds.Dy(); y++ {
+			for x := 0; x < rgbaBounds.Dx(); x++ {
+				rgbaImg.Set(x, y, img.At(bounds.Min.X+x, bounds.Min.Y+y))
 			}
 		}
 
@@ -865,7 +928,7 @@ func (_textureRepository *TextureRepository) TryGenerateArmorTrimTexture(normali
 func (_textureRepository *TextureRepository) ResolveArmorTrimPalette(materialToken string) *image.RGBA {
 	for _, candidate := range EnumerateArmorTrimPaletteCandidates(materialToken) {
 		palette := _textureRepository.GetTexture("trims/color_palettes/" + candidate)
-		if palette != nil && sameRGBA(*palette, _textureRepository._missingTexture) {
+		if palette != nil && !sameRGBA(*palette, _textureRepository._missingTexture) {
 			return palette
 		}
 	}
@@ -958,4 +1021,22 @@ func (_textureRepository *TextureRepository) GetTintedTexture(textureId string, 
 
 	_textureRepository._cache[cacheKey] = *tinted
 	return tinted
+}
+
+func LoadImageFromStream(stream io.Reader) (*image.RGBA, error) {
+	img, _, err := image.Decode(stream)
+	if err != nil {
+		return nil, err
+	}
+
+	bounds := img.Bounds()
+	rgbaBounds := image.Rect(0, 0, bounds.Dx(), bounds.Dy())
+	rgbaImg := image.NewRGBA(rgbaBounds)
+	for y := 0; y < rgbaBounds.Dy(); y++ {
+		for x := 0; x < rgbaBounds.Dx(); x++ {
+			rgbaImg.Set(x, y, img.At(bounds.Min.X+x, bounds.Min.Y+y))
+		}
+	}
+
+	return rgbaImg, nil
 }

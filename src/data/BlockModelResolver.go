@@ -4,7 +4,6 @@ import (
 	"duckysolucky/gorenderer/src/assets"
 	"duckysolucky/gorenderer/src/global"
 	"fmt"
-	"maps"
 	"os"
 )
 
@@ -47,14 +46,15 @@ func (resolver *BlockModelResolver) LoadFromMinecraftAssets(assetsPath string, o
 		panic("assetsPath cannot be empty")
 	}
 
-	MinecraftAssetLoader := MinecraftAssetLoader{}
-	definitions := MinecraftAssetLoader.LoadModelDefinitions(assetsPath, overlayRoots, assetNamespaces)
+	definitions := MinecraftAssetLoaderInstance.LoadModelDefinitions(assetsPath, overlayRoots, assetNamespaces)
 	if definitions == nil {
 		panic(fmt.Sprintf("Failed to load model definitions from Minecraft assets at '%s'.", assetsPath))
 	}
 
-	resolver.Definitions = make(map[string]BlockModelDefinition)
-	maps.Copy(resolver.Definitions, definitions)
+	for key, def := range definitions {
+		resolver.Definitions[key] = def
+		fmt.Printf("Loaded model definition: %s\n", key)
+	}
 
 	resolver._cache = make(map[string]BlockModelInstance)
 
@@ -83,6 +83,7 @@ func (resolver *BlockModelResolver) ResolveInternal(model string, stack map[stri
 		panic(fmt.Sprintf("Detected circular model inheritance involving '%s'.", model))
 	}
 
+	fmt.Printf("Resolving model: %s\n", model)
 	definition, exists := resolver.Definitions[model]
 	if !exists {
 		panic(fmt.Sprintf("Model '%s' was not found in the loaded definitions.", model))
@@ -176,21 +177,21 @@ func (resolver *BlockModelResolver) CloneElement(element ModelElement) ModelElem
 }
 
 func (resolver *BlockModelResolver) CloneTransform(source TransformDefinition) TransformDefinition {
-	var rotation []float32
+	var rotation []float64
 	if source.Rotation != nil {
-		rotation = make([]float32, len(*source.Rotation))
+		rotation = make([]float64, len(*source.Rotation))
 		copy(rotation, *source.Rotation)
 	}
 
-	var translation []float32
+	var translation []float64
 	if source.Translation != nil {
-		translation = make([]float32, len(*source.Translation))
+		translation = make([]float64, len(*source.Translation))
 		copy(translation, *source.Translation)
 	}
 
-	var scale []float32
+	var scale []float64
 	if source.Scale != nil {
-		scale = make([]float32, len(*source.Scale))
+		scale = make([]float64, len(*source.Scale))
 		copy(scale, *source.Scale)
 	}
 
@@ -290,10 +291,10 @@ func (resolver *BlockModelResolver) NormalizeName(name string) string {
 	return normalized
 }
 
-func NewBlockModelResolver() *BlockModelResolver {
+func NewBlockModelResolver(definitions map[string]BlockModelDefinition) *BlockModelResolver {
 	return &BlockModelResolver{
-		Definitions: make(map[string]BlockModelDefinition),
+		Definitions: definitions,
 	}
 }
 
-var BlockModelResolverInstance = NewBlockModelResolver()
+var BlockModelResolverInstance = NewBlockModelResolver(make(map[string]BlockModelDefinition))

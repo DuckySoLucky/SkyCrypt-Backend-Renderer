@@ -13,7 +13,7 @@ import (
 // private const byte CompressionNone = 0xFF;
 // private const byte CompressionGzip = 0xFE;
 const (
-	Magic           uint32 = 0x43617473 // "Cats" in ASCII
+	Magic           uint32 = 0x43415453 // "Cats" in ASCII
 	CurrentVersion  byte   = 0x01
 	CompressionNone byte   = 0xFF
 	CompressionGzip byte   = 0xFE
