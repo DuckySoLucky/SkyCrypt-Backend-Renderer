@@ -1,7 +1,9 @@
 package assets
 
 import (
+	"fmt"
 	"io"
+	"sort"
 	"strings"
 )
 
@@ -16,7 +18,10 @@ func NewSubPathResourceProvider(inner ResourceProvider, prefix string) *SubPathR
 		panic("inner cannot be nil")
 	}
 
-	normalizedPrefix := normalizeSubPath(prefix)
+	normalizedPrefix, err := normalizeSubPath(prefix)
+	if err != nil {
+		panic(err)
+	}
 	if normalizedPrefix != "" && !strings.HasSuffix(normalizedPrefix, "/") {
 		normalizedPrefix += "/"
 	}
@@ -36,7 +41,11 @@ func (s *SubPathResourceProvider) RootPath() string {
 }
 
 func (s *SubPathResourceProvider) FileExists(path string) bool {
-	return s.inner.FileExists(s.prefix + normalizeSubPath(path))
+	normalized, err := normalizeSubPath(path)
+	if err != nil {
+		return false
+	}
+	return s.inner.FileExists(s.prefix + normalized)
 }
 
 func (s *SubPathResourceProvider) DirectoryExists(path string) bool {
@@ -44,17 +53,29 @@ func (s *SubPathResourceProvider) DirectoryExists(path string) bool {
 		return s.inner.DirectoryExists(strings.TrimRight(s.prefix, "/"))
 	}
 
-	return s.inner.DirectoryExists(s.prefix + normalizeSubPath(path))
+	normalized, err := normalizeSubPath(path)
+	if err != nil {
+		return false
+	}
+	return s.inner.DirectoryExists(s.prefix + normalized)
 }
 
 func (s *SubPathResourceProvider) OpenRead(path string) (io.ReadCloser, error) {
-	return s.inner.OpenRead(s.prefix + normalizeSubPath(path))
+	normalized, err := normalizeSubPath(path)
+	if err != nil {
+		return nil, err
+	}
+	return s.inner.OpenRead(s.prefix + normalized)
 }
 
 func (s *SubPathResourceProvider) EnumerateFiles(dir string, pattern string, recursive bool) ([]string, error) {
 	innerDir := strings.TrimRight(s.prefix, "/")
 	if strings.TrimSpace(dir) != "" {
-		innerDir = s.prefix + normalizeSubPath(dir)
+		normalized, err := normalizeSubPath(dir)
+		if err != nil {
+			return nil, err
+		}
+		innerDir = s.prefix + normalized
 	}
 
 	paths, err := s.inner.EnumerateFiles(innerDir, pattern, recursive)
@@ -62,13 +83,19 @@ func (s *SubPathResourceProvider) EnumerateFiles(dir string, pattern string, rec
 		return nil, err
 	}
 
-	return s.stripPrefixedPaths(paths), nil
+	stripped := s.stripPrefixedPaths(paths)
+	sort.Strings(stripped)
+	return stripped, nil
 }
 
 func (s *SubPathResourceProvider) EnumerateDirectories(dir string, pattern string, recursive bool) ([]string, error) {
 	innerDir := strings.TrimRight(s.prefix, "/")
 	if strings.TrimSpace(dir) != "" {
-		innerDir = s.prefix + normalizeSubPath(dir)
+		normalized, err := normalizeSubPath(dir)
+		if err != nil {
+			return nil, err
+		}
+		innerDir = s.prefix + normalized
 	}
 
 	paths, err := s.inner.EnumerateDirectories(innerDir, pattern, recursive)
@@ -76,7 +103,9 @@ func (s *SubPathResourceProvider) EnumerateDirectories(dir string, pattern strin
 		return nil, err
 	}
 
-	return s.stripPrefixedPaths(paths), nil
+	stripped := s.stripPrefixedPaths(paths)
+	sort.Strings(stripped)
+	return stripped, nil
 }
 
 func (s *SubPathResourceProvider) Close() error {
@@ -114,14 +143,30 @@ func (s *SubPathResourceProvider) stripPrefix(path string) (string, bool) {
 	return "", false
 }
 
-func normalizeSubPath(path string) string {
-	return strings.TrimLeft(strings.ReplaceAll(path, "\\", "/"), "/")
+func normalizeSubPath(path string) (string, error) {
+	return normalizeProviderRelativePath(path)
 }
 
 func (s *SubPathResourceProvider) ReadAllText(path string) (string, error) {
-	panic("ReadAllText is not implemented for SubPathResourceProvider")
+	normalized, err := normalizeSubPath(path)
+	if err != nil {
+		return "", err
+	}
+	return s.inner.ReadAllText(s.prefix + normalized)
 }
 
 func (s *SubPathResourceProvider) GetRelativePath(fullRelativePath string, directoryPrefix string) (string, error) {
-	panic("GetRelativePath is not implemented for SubPathResourceProvider")
+	full, err := normalizeSubPath(fullRelativePath)
+	if err != nil {
+		return "", err
+	}
+	prefix, err := normalizeSubPath(directoryPrefix)
+	if err != nil {
+		return "", err
+	}
+	stripped, err := stripProviderDirectoryPrefix(full, prefix)
+	if err != nil {
+		return "", fmt.Errorf("subpath relative path: %w", err)
+	}
+	return stripped, nil
 }

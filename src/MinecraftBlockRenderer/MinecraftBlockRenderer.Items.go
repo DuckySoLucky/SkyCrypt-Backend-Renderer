@@ -121,7 +121,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderGuiItemInternal(ite
 
 	model, candidates, resolvedModelName := _minecraftBlockRenderer.ResolveItemModel(normalizedItemKey, itemInfo, *options)
 	// Console.WriteLine($"Resolved model for item '{itemName}': '{model?.Name}' with candidates [{string.Join(", ", modelCandidates)}].");
-	fmt.Printf("Resolved model for item '%s': '%v' with candidates [%s].\n", itemName, model, strings.Join(candidates, ", "))
+	_ = candidates
 
 	if capture != nil {
 		capture.Model = model
@@ -166,12 +166,11 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderGuiItemInternal(ite
 		return finalizeGuiResult(bedRender)
 	}
 
-	if _minecraftBlockRenderer.HasExplicitFlatHeadOverride(model, candidates, *options) {
+	if !_minecraftBlockRenderer.HasExplicitFlatHeadOverride(model, candidates, *options) {
 		headComposite := _minecraftBlockRenderer.RenderPlayerHead(itemName, model, candidates, *options)
 		if headComposite != nil {
 			return finalizeGuiResult(headComposite)
 		}
-
 	}
 
 	if model != nil && _minecraftBlockRenderer.IsBillboardModel(model) {
@@ -220,7 +219,10 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) ResolveItemModel(itemName
 	firmamentModel := _minecraftBlockRenderer.GetFirmamentModel(options.ItemData)
 	skyblockItemModel := _minecraftBlockRenderer.GetSkyblockItemModel(itemName, options.ItemData, displayContext)
 
-	primaryModel := itemInfo.Model
+	var primaryModel *string
+	if itemInfo != nil {
+		primaryModel = itemInfo.Model
+	}
 	var fallbackModel string
 	if firmamentModel != nil && strings.TrimSpace(*firmamentModel) != "" {
 		fallbackModel = *firmamentModel
@@ -272,8 +274,8 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) ResolveItemModel(itemName
 	var model *data.BlockModelInstance
 	var resolvedModelName *string
 	for _, candidate := range candidates {
-		resolved := data.BlockModelResolverInstance.Resolve(candidate)
-		if resolved != nil {
+		resolved, exists := _minecraftBlockRenderer._modelResolver.TryResolve(candidate)
+		if exists && resolved != nil {
 			model = resolved
 			resolvedModelName = &candidate
 			normalizedName := _minecraftBlockRenderer.NormalizeModelIdentifier(*resolvedModelName)
@@ -347,8 +349,8 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) GetSkyblockItemModel(item
 	}
 
 	if tag, ok := itemData.CustomData.Get("id"); ok {
-		if idTag, ok := tag.(nbt.NbtString); ok && strings.TrimSpace(idTag.Value) != "" {
-			encodedId := _minecraftBlockRenderer.EncodeFirmamentId(idTag.Value)
+		if rawSkyblockId, ok := nbtStringFromTag(tag); ok && strings.TrimSpace(rawSkyblockId) != "" {
+			encodedId := _minecraftBlockRenderer.EncodeFirmamentId(rawSkyblockId)
 			info := _minecraftBlockRenderer._itemRegistry.GetItemInfo(encodedId)
 			if info != nil {
 				var model *string
@@ -369,6 +371,77 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) GetSkyblockItemModel(item
 				if model != nil && strings.Contains(*model, ":") {
 					return model
 				}
+			}
+
+			if model := _minecraftBlockRenderer.ResolveSkyblockItemModelFromPackProviders(encodedId, itemName, itemData, displayContext); model != nil {
+				return model
+			}
+		}
+	}
+
+	return nil
+}
+
+func nbtStringFromTag(tag nbt.NbtTag) (string, bool) {
+	switch value := tag.(type) {
+	case nbt.NbtString:
+		return value.Value, true
+	case *nbt.NbtString:
+		return value.Value, true
+	default:
+		return "", false
+	}
+}
+
+func (_minecraftBlockRenderer *MinecraftBlockRenderer) ResolveSkyblockItemModelFromPackProviders(encodedId string, itemName string, itemData *data.ItemRenderData, displayContext string) *string {
+	if strings.TrimSpace(encodedId) == "" {
+		return nil
+	}
+
+	direct := "assets/skyblock/items/" + strings.ToLower(encodedId) + ".json"
+	suffix := "/" + direct
+
+	for packIndex := len(_minecraftBlockRenderer._packContext.Packs) - 1; packIndex >= 0; packIndex-- {
+		pack := _minecraftBlockRenderer._packContext.Packs[packIndex]
+		if pack.Provider == nil {
+			continue
+		}
+
+		files, err := pack.Provider.EnumerateFiles("", "*.json", true)
+		if err != nil {
+			continue
+		}
+
+		for _, file := range files {
+			lower := strings.ToLower(strings.ReplaceAll(file, "\\", "/"))
+			if lower != direct && !strings.HasSuffix(lower, suffix) {
+				continue
+			}
+
+			jsonContent, err := pack.Provider.ReadAllText(file)
+			if err != nil {
+				continue
+			}
+
+			var itemDefinition map[string]interface{}
+			if err := global.JSON.Unmarshal([]byte(jsonContent), &itemDefinition); err != nil {
+				continue
+			}
+
+			if selector := data.ParseItemModelSelectorFromRoot(itemDefinition); selector != nil {
+				resolved := selector.Resolve(data.ItemModelContext{
+					ItemData:       itemData,
+					DisplayContext: displayContext,
+					ItemName:       itemName,
+				})
+				if resolved != nil && strings.TrimSpace(*resolved) != "" {
+					return resolved
+				}
+			}
+
+			modelReference := data.ResolveModelReferenceFromItemDefinition(itemDefinition)
+			if strings.TrimSpace(modelReference) != "" {
+				return &modelReference
 			}
 		}
 	}
@@ -490,12 +563,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) IsBedItem(normalizedItemK
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) ShouldPreferPlayerHeadRenderer(itemName string, model *data.BlockModelInstance, modelCandidates []string, options BlockRenderOptions) (bool, *BlockRenderOptions) {
 	adjustedOptions := &options
 	itemData := options.ItemData
-	var resolver func(context SkullResolverContext) *string
-	if options.SkullTextureResolver != nil {
-		resolver = options.SkullTextureResolver
-	} else {
-		resolver = DefaultSkullTextureResolver
-	}
+	resolver := options.SkullTextureResolver
 	hasResolver := resolver != nil
 
 	var hasHeadTextureOverride bool
@@ -668,6 +736,53 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) ContainsTemplateSkullToke
 	return strings.Contains(strings.ToLower(candidate), "template_skull")
 }
 
+func (_minecraftBlockRenderer *MinecraftBlockRenderer) ShouldUseSkyBlockTemplateSkullItemOrientation(model *data.BlockModelInstance, options BlockRenderOptions) bool {
+	if model == nil || len(model.Elements) == 0 || options.ItemData == nil || options.ItemData.CustomData == nil {
+		return false
+	}
+	if !_minecraftBlockRenderer.ModelChainContainsTemplateSkull(model) {
+		return false
+	}
+	if _, ok := _minecraftBlockRenderer.TryGetString(options.ItemData.CustomData, "id"); !ok {
+		return false
+	}
+	return true
+}
+
+func cloneTransformWithYawOffset(source *data.TransformDefinition, yawOffset float64) *data.TransformDefinition {
+	if source == nil {
+		return nil
+	}
+
+	var rotation []float64
+	if source.Rotation != nil {
+		rotation = make([]float64, len(*source.Rotation))
+		copy(rotation, *source.Rotation)
+	}
+	for len(rotation) < 3 {
+		rotation = append(rotation, 0)
+	}
+	rotation[1] += yawOffset
+
+	var translation []float64
+	if source.Translation != nil {
+		translation = make([]float64, len(*source.Translation))
+		copy(translation, *source.Translation)
+	}
+
+	var scale []float64
+	if source.Scale != nil {
+		scale = make([]float64, len(*source.Scale))
+		copy(scale, *source.Scale)
+	}
+
+	return &data.TransformDefinition{
+		Rotation:    &rotation,
+		Translation: &translation,
+		Scale:       &scale,
+	}
+}
+
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) IsPlayerHeadCandidate(itemName string, model *data.BlockModelInstance, modelCandidates []string) bool {
 	normalized := _minecraftBlockRenderer.NormalizeItemTextureKey(itemName)
 	if !strings.EqualFold(normalized, "player_head") {
@@ -697,7 +812,10 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderPlayerHead(itemName
 		return nil
 	}
 
-	rotation := options.OverrideGuiTransform.Rotation
+	var rotation *[]float64
+	if options.OverrideGuiTransform != nil {
+		rotation = options.OverrideGuiTransform.Rotation
+	}
 	if rotation == nil && model != nil {
 		if displayTransform, ok := model.Display["gui"]; ok {
 			rotation = displayTransform.Rotation
@@ -1349,7 +1467,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderFlatItem(layerTextu
 		layerTint := explicitLayerTint
 		defaultTintApplied := false
 		defaultTint, _ := _minecraftBlockRenderer.TryResolveDefaultLayerTint(normalizedItemKey, itemInfo, layerIndex, layerIndex == primaryTintLayerIndex, disablePrimaryDefault)
-		if layerTint != nil && defaultTint == nil {
+		if layerTint == nil && defaultTint != nil {
 			layerTint = defaultTint
 			defaultTintApplied = true
 		}
@@ -1564,7 +1682,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) ShouldApplyItemColorTint(
 	if itemInfo != nil {
 		var model *data.BlockModelInstance
 
-		if strings.TrimSpace(*itemInfo.Model) != "" {
+		if itemInfo.Model != nil && strings.TrimSpace(*itemInfo.Model) != "" {
 			model = _minecraftBlockRenderer.ResolveModelOrNull(itemInfo.Model)
 		}
 
@@ -1589,8 +1707,8 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) ResolveModelOrNull(name *
 		return nil
 	}
 
-	model := _minecraftBlockRenderer._modelResolver.Resolve(*name)
-	if model == nil {
+	model, ok := _minecraftBlockRenderer._modelResolver.TryResolve(*name)
+	if !ok || model == nil {
 		return nil
 	}
 
@@ -2030,12 +2148,18 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) HasExplicitFlatHeadOverri
 	hasNonDefaultCandidate := _minecraftBlockRenderer.HasNonDefaultPlayerHeadModelCandidate(modelCandidates)
 	itemData := options.ItemData
 	hasProfileData := itemData != nil && itemData.Profile != nil
-	_, exists := _minecraftBlockRenderer.GetHeadTextureOverride(itemData.CustomData)
+	var exists bool
+	if itemData != nil {
+		_, exists = _minecraftBlockRenderer.GetHeadTextureOverride(itemData.CustomData)
+	}
 	hasCustomTexture := itemData != nil && itemData.CustomData != nil && exists
 
 	if (hasProfileData || hasCustomTexture) &&
 		hasNonDefaultCandidate &&
 		_minecraftBlockRenderer.ModelChainContainsTemplateSkull(model) {
+		if _minecraftBlockRenderer.IsResolvedCustomTemplateSkullModel(model) {
+			return true
+		}
 		return false
 	}
 
@@ -2056,6 +2180,18 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) HasExplicitFlatHeadOverri
 	}
 
 	return hasNonDefaultCandidate
+}
+
+func (_minecraftBlockRenderer *MinecraftBlockRenderer) IsResolvedCustomTemplateSkullModel(model *data.BlockModelInstance) bool {
+	if model == nil {
+		return false
+	}
+
+	if strings.TrimSpace(model.Name) == "" || _minecraftBlockRenderer.ContainsTemplateSkullToken(model.Name) {
+		return false
+	}
+
+	return !_minecraftBlockRenderer.IsDefaultPlayerHeadModelCandidate(model.Name)
 }
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) HasNonDefaultPlayerHeadModelCandidate(modelCandidates []string) bool {
@@ -2317,21 +2453,6 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) EnumerateTextureNameVaria
 	return candidates
 }
 
-// public RenderedResource RenderGuiItemWithResourceId(string itemName,
-//
-//		BlockRenderOptions? options = null) {
-//		ArgumentException.ThrowIfNullOrWhiteSpace(itemName);
-//		var effectiveOptions = options ?? BlockRenderOptions.Default;
-//		var renderer = ResolveRendererForOptions(effectiveOptions, out var forwardedOptions);
-//		var capture = new ItemRenderCapture();
-//		var image = renderer.RenderGuiItemInternal(itemName, forwardedOptions, capture);
-//		var resourceTarget = string.IsNullOrWhiteSpace(capture.OriginalTarget)
-//			? itemName.Trim()
-//			: capture.OriginalTarget;
-//		var idOptions = capture.FinalOptions ?? forwardedOptions;
-//		var resourceId = renderer.ComputeResourceIdInternal(resourceTarget, idOptions, capture.ToResolution());
-//		return new RenderedResource(image, resourceId);
-//	}
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderGuiItemWithResourceId(itemName string, options *BlockRenderOptions) *RenderedResource {
 	effectiveOptions := options
 	if effectiveOptions == nil {

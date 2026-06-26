@@ -110,6 +110,33 @@ func (_textureRepository *TextureRepository) GetTexture(textureId string) *image
 	return &loadedTexture
 }
 
+func (_textureRepository *TextureRepository) GetAnimation(textureId string) (*TextureAnimation, bool) {
+	if _textureRepository == nil {
+		return nil, false
+	}
+	normalizedTextureId := _textureRepository.NormalizeTextureId(textureId)
+	if _, found := _textureRepository._animationCache[normalizedTextureId]; !found {
+		_textureRepository.GetTexture(textureId)
+	}
+	animation, found := _textureRepository._animationCache[normalizedTextureId]
+	if !found {
+		return nil, false
+	}
+	return &animation, true
+}
+
+func (_textureRepository *TextureRepository) WithAnimationOverride(override *AnimationOverride, render func()) {
+	if _textureRepository == nil || render == nil {
+		return
+	}
+	previous := _textureRepository._activeAnimationOverride
+	_textureRepository._activeAnimationOverride = override
+	defer func() {
+		_textureRepository._activeAnimationOverride = previous
+	}()
+	render()
+}
+
 func (_textureRepository *TextureRepository) TryGetTexture(textureId string) (*image.RGBA, bool) {
 	if textureId == "" {
 		return nil, false
@@ -727,7 +754,7 @@ func TryBuildTextureAnimation(spriteSheet image.RGBA, openMcmeta *func() (io.Rea
 	}
 
 	stream, err := (*openMcmeta)()
-	if err != nil {
+	if err != nil || stream == nil {
 		return nil
 	}
 	defer func() {
@@ -738,14 +765,11 @@ func TryBuildTextureAnimation(spriteSheet image.RGBA, openMcmeta *func() (io.Rea
 
 	var metaData struct {
 		Animation struct {
-			FrameTime   float64 `json:"frametime"`
-			Interpolate bool    `json:"interpolate"`
-			Frames      []struct {
-				Index     int     `json:"index"`
-				FrameTime float64 `json:"frametime"`
-			} `json:"frames"`
-			Width  int `json:"width"`
-			Height int `json:"height"`
+			FrameTime   float64       `json:"frametime"`
+			Interpolate bool          `json:"interpolate"`
+			Frames      []interface{} `json:"frames"`
+			Width       int           `json:"width"`
+			Height      int           `json:"height"`
 		} `json:"animation"`
 	}
 
@@ -777,7 +801,8 @@ func TryBuildTextureAnimation(spriteSheet image.RGBA, openMcmeta *func() (io.Rea
 	maximumFrameIndex := max(framesPerRow*framesPerColumn-1, 0)
 
 	var frames []TextureAnimationFrame
-	for _, descriptor := range metaData.Animation.Frames {
+	for _, rawDescriptor := range metaData.Animation.Frames {
+		descriptor := parseAnimationFrameDescriptor(rawDescriptor, metaData.Animation.FrameTime)
 		if descriptor.Index < 0 {
 			continue
 		}
@@ -818,6 +843,29 @@ func TryBuildTextureAnimation(spriteSheet image.RGBA, openMcmeta *func() (io.Rea
 	}
 
 	return NewTextureAnimation(frames, metaData.Animation.Interpolate, frameWidth, frameHeight)
+}
+
+type animationFrameDescriptor struct {
+	Index     int
+	FrameTime float64
+}
+
+func parseAnimationFrameDescriptor(raw interface{}, defaultFrameTime float64) animationFrameDescriptor {
+	descriptor := animationFrameDescriptor{Index: -1, FrameTime: defaultFrameTime}
+	switch typed := raw.(type) {
+	case float64:
+		descriptor.Index = int(typed)
+	case int:
+		descriptor.Index = typed
+	case map[string]interface{}:
+		if index, ok := typed["index"].(float64); ok {
+			descriptor.Index = int(index)
+		}
+		if frameTime, ok := typed["frametime"].(float64); ok && frameTime > 0 {
+			descriptor.FrameTime = frameTime
+		}
+	}
+	return descriptor
 }
 
 func DecodeDataUri(dataUri string) (image.RGBA, error) {

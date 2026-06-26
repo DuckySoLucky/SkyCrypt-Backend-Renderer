@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -28,7 +29,10 @@ func NewCatsResourceProvider(catsFile *CatsFile, displayPath string, optionalPre
 		prefix = optionalPrefix[0]
 	}
 
-	normalizedPrefix := normalizeSubPath(prefix)
+	normalizedPrefix, err := normalizeSubPath(prefix)
+	if err != nil {
+		panic(err)
+	}
 	if normalizedPrefix != "" && !strings.HasSuffix(normalizedPrefix, "/") {
 		normalizedPrefix += "/"
 	}
@@ -119,6 +123,7 @@ func (c *CatsResourceProvider) EnumerateFiles(directory, searchPattern string, r
 		}
 	}
 
+	sort.Strings(results)
 	return results, nil
 }
 
@@ -150,6 +155,7 @@ func (c *CatsResourceProvider) EnumerateDirectories(directory, searchPattern str
 		}
 	}
 
+	sort.Strings(results)
 	return results, nil
 }
 
@@ -158,25 +164,15 @@ func (c *CatsResourceProvider) Close() error {
 }
 
 func (c *CatsResourceProvider) GetRelativePath(fullRelativePath string, directoryPrefix string) (string, error) {
-	// normalized, err := normalizePath(fullRelativePath)
-	// if err != nil {
-	// 	return "", err
-	// }
-
-	// prefix := strings.TrimRight(strings.ReplaceAll(directoryPrefix, "\\", "/"), "/")
-	// if prefix == "." {
-	// 	prefix = ""
-	// }
-
-	// if prefix != "" {
-	// 	if !strings.HasPrefix(normalized, prefix+"/") {
-	// 		return "", fmt.Errorf("path '%s' does not start with expected directory prefix '%s'", fullRelativePath, directoryPrefix)
-	// 	}
-	// 	return normalized[len(prefix)+1:], nil
-	// }
-
-	// return normalized, nil
-	panic("GetRelativePath is not implemented for CatsResourceProvider because it's not needed in the current usage. If you need this functionality, please implement it based on your specific requirements.")
+	normalized, err := normalizePath(fullRelativePath)
+	if err != nil {
+		return "", err
+	}
+	prefix, err := normalizePath(directoryPrefix)
+	if err != nil {
+		return "", err
+	}
+	return stripProviderDirectoryPrefix(normalized, prefix)
 }
 
 func (c *CatsResourceProvider) ReadAllText(path string) (string, error) {
@@ -232,11 +228,15 @@ func buildIndex(catsFile *CatsFile, prefix string) (map[string]*CatsFileEntry, m
 
 func indexDirectory(dir *CatsDirectoryEntry, parentPath string, files map[string]*CatsFileEntry, dirs map[string]struct{}) {
 	for name, entry := range dir.Children {
-		var path string
+		var rawPath string
 		if parentPath != "" {
-			path = parentPath + "/" + name
+			rawPath = parentPath + "/" + name
 		} else {
-			path = name
+			rawPath = name
+		}
+		path, err := normalizePath(rawPath)
+		if err != nil {
+			continue
 		}
 
 		switch e := entry.(type) {
@@ -263,16 +263,10 @@ func indexParentDirectories(path string, dirs map[string]struct{}) {
 }
 
 func normalizePath(path string) (string, error) {
-	if strings.TrimSpace(path) == "" {
-		return "", nil
+	normalized, err := normalizeProviderRelativePath(path)
+	if err != nil {
+		return "", errors.New(err.Error())
 	}
-
-	normalized := strings.ReplaceAll(path, "\\", "/")
-	normalized = strings.TrimLeft(normalized, "/")
-	if strings.Contains(normalized, "..") {
-		return "", errors.New("path traversal is not allowed")
-	}
-
 	return normalized, nil
 }
 

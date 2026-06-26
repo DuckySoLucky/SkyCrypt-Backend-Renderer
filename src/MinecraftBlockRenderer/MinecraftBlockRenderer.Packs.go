@@ -187,22 +187,27 @@ func AddOverlayNamespaces(registry *assets.AssetNamespaceRegistry, overlay Overl
 		return
 	}
 
-	normalized, err := os.Getwd()
-	if err != nil {
-		return
-	}
-
-	assetsDirectory := normalized + "/assets"
+	normalized := overlay.Path
+	assetsDirectory := filepath.Join(normalized, "assets")
 	if fi, err := os.Stat(assetsDirectory); err == nil && fi.IsDir() {
 		files, err := os.ReadDir(assetsDirectory)
 		if err == nil {
 			for _, file := range files {
 				if file.IsDir() {
 					namespaceName := file.Name()
-					registry.AddNamespace(namespaceName, assetsDirectory+"/"+namespaceName, overlay.SourceId, overlay.Kind == "vanilla")
+					registry.AddNamespace(namespaceName, filepath.Join(assetsDirectory, namespaceName), overlay.SourceId, overlay.Kind == "vanilla")
 				}
 			}
 		}
+		return
+	}
+
+	if fi, err := os.Stat(filepath.Join(normalized, "models")); err == nil && fi.IsDir() {
+		registry.AddNamespace("minecraft", normalized, overlay.SourceId, overlay.Kind == "vanilla")
+		return
+	}
+	if fi, err := os.Stat(filepath.Join(normalized, "textures")); err == nil && fi.IsDir() {
+		registry.AddNamespace("minecraft", normalized, overlay.SourceId, overlay.Kind == "vanilla")
 		return
 	}
 
@@ -210,17 +215,15 @@ func AddOverlayNamespaces(registry *assets.AssetNamespaceRegistry, overlay Overl
 }
 
 func RegisterProviderNamespaces(registry *assets.AssetNamespaceRegistry, pack texturepacks.RegisteredResourcePack) {
-	if pack.NamespaceProviders == nil {
-		return
-	}
+	if pack.NamespaceProviders != nil {
+		for namespaceName, nsProvider := range pack.NamespaceProviders {
+			displayPath := pack.RootPath
+			registry.AddNamespaceWithProvider(namespaceName, displayPath, pack.Id, false, nsProvider)
 
-	for namespaceName, nsProvider := range pack.NamespaceProviders {
-		displayPath := pack.RootPath
-		registry.AddNamespaceWithProvider(namespaceName, displayPath, pack.Id, false, nsProvider)
-
-		if nsProvider.DirectoryExists("textures") {
-			texturesProvider := assets.NewSubPathResourceProvider(nsProvider, "textures")
-			registry.AddNamespaceWithProvider(namespaceName, displayPath+"/textures", pack.Id, false, texturesProvider)
+			if nsProvider.DirectoryExists("textures") {
+				texturesProvider := assets.NewSubPathResourceProvider(nsProvider, "textures")
+				registry.AddNamespaceWithProvider(namespaceName, displayPath+"/textures", pack.Id, false, texturesProvider)
+			}
 		}
 	}
 
@@ -260,7 +263,19 @@ func RenderPackContextCreate(assetsDirectory *string, baseOverlayRoots []Overlay
 		assetsRoot = *assetsDirectory
 	}
 
-	return NewRenderPackContext(assetsRoot, overlays, nil, "", nil, nil)
+	var packIds []string
+	packStackHash := ""
+	var packs []texturepacks.RegisteredResourcePack
+	if packStack != nil {
+		packStackHash = packStack.Fingerprint
+		packs = packStack.Packs
+		packIds = make([]string, 0, len(packStack.Packs))
+		for _, pack := range packStack.Packs {
+			packIds = append(packIds, pack.Id)
+		}
+	}
+
+	return NewRenderPackContext(assetsRoot, overlays, packIds, packStackHash, packs, nil)
 
 }
 
@@ -338,8 +353,13 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) CreatePackRenderer(packSt
 	modelResolver := data.BlockModelResolverInstance.LoadFromMinecraftAssets(_minecraftBlockRenderer._assetsDirectory, &overlayPaths, &packContext.AssetNamespaces)
 	blockRegistry := data.BlockRegistryInstance.LoadFromMinecraftAssets(_minecraftBlockRenderer._assetsDirectory, modelResolver.Definitions, overlayPaths, &packContext.AssetNamespaces)
 	itemRegistry := data.ItemRegistryInstance.LoadFromMinecraftAssets(_minecraftBlockRenderer._assetsDirectory, modelResolver.Definitions, overlayPaths, &packContext.AssetNamespaces)
+	textureRoot := filepath.Join(_minecraftBlockRenderer._assetsDirectory, "textures")
+	if _, err := os.Stat(textureRoot); os.IsNotExist(err) {
+		textureRoot = _minecraftBlockRenderer._assetsDirectory
+	}
+	textureRepository := data.NewTextureRepository(textureRoot, nil, overlayPaths, packContext.AssetNamespaces)
 
-	return NewMinecraftBlockRenderer(modelResolver, nil, blockRegistry, itemRegistry, _minecraftBlockRenderer._packContext.AssetsRoot, _minecraftBlockRenderer._packContext.OverlayRoots, nil, *packContext)
+	return NewMinecraftBlockRenderer(modelResolver, textureRepository, blockRegistry, itemRegistry, _minecraftBlockRenderer._packContext.AssetsRoot, _minecraftBlockRenderer._baseOverlayRoots, _minecraftBlockRenderer._packRegistry, *packContext)
 }
 
 type PacksOverlayRoot struct {
@@ -434,7 +454,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) ComputeResourceIdInternal
 			for _, texture := range _minecraftBlockRenderer.CollectResolvedTextures(effectiveModel) {
 				resolvedTextures[texture] = struct{}{}
 			}
-		} else if info.Texture != nil {
+		} else if info != nil && info.Texture != nil {
 			resolvedTextures[*info.Texture] = struct{}{}
 		}
 
@@ -580,6 +600,21 @@ func rgbaToHex(c *color.RGBA) string {
 }
 
 func BuildItemRenderDataKey(data *data.ItemRenderData) string {
+	if data == nil {
+		return ""
+	}
+	customKey := "none"
+	if data.CustomData != nil {
+		customKey = BuildResourceRelevantCustomDataKey(data.CustomData)
+	}
+	if data.Layer0Tint == nil &&
+		!data.DisableDefaultLayer0Tint &&
+		len(data.AdditionalLayerTints) == 0 &&
+		(customKey == "" || customKey == "none") &&
+		data.Profile == nil {
+		return ""
+	}
+
 	builder := strings.Builder{}
 
 	if data.Layer0Tint != nil {
@@ -614,7 +649,7 @@ func BuildItemRenderDataKey(data *data.ItemRenderData) string {
 
 	if data.CustomData != nil {
 		builder.WriteString(";custom=")
-		builder.WriteString(BuildCustomDataKey(data.CustomData))
+		builder.WriteString(customKey)
 	} else {
 		builder.WriteString(";custom=none")
 	}
@@ -635,20 +670,20 @@ func BuildProfileKey(profile *nbt.NbtCompound) string {
 		if properties, ok := propertiesTag.(*nbt.NbtList); ok {
 			for i := 0; i < properties.Count(); i++ {
 				entry := properties.At(i)
-				propertyCompound, ok := entry.(*nbt.NbtCompound)
-				if !ok {
+				propertyCompound := nbtCompoundFromTag(entry)
+				if propertyCompound == nil {
 					continue
 				}
 
 				nameTag, nameExists := propertyCompound.Get("name")
-				nameValue, isNbtString := nameTag.(*nbt.NbtString)
+				nameValue, isNbtString := nbtStringValue(nameTag)
 				valueTag, valueExists := propertyCompound.Get("value")
-				valueString, isValueNbtString := valueTag.(*nbt.NbtString)
+				valueString, isValueNbtString := nbtStringValue(valueTag)
 
 				if nameExists && isNbtString && valueExists && isValueNbtString &&
-					strings.EqualFold(nameValue.Value, "textures") &&
-					strings.TrimSpace(valueString.Value) != "" {
-					hash := sha256.Sum256([]byte(valueString.Value))
+					strings.EqualFold(nameValue, "textures") &&
+					strings.TrimSpace(valueString) != "" {
+					hash := sha256.Sum256([]byte(valueString))
 					return hex.EncodeToString(hash[:])
 				}
 			}
@@ -672,17 +707,31 @@ func FormatNbtValue(tag nbt.NbtTag) string {
 	switch v := tag.(type) {
 	case *nbt.NbtString:
 		return v.Value
+	case nbt.NbtString:
+		return v.Value
 	case *nbt.NbtByte:
+		return strconv.FormatInt(int64(v.Value), 10)
+	case nbt.NbtByte:
 		return strconv.FormatInt(int64(v.Value), 10)
 	case *nbt.NbtShort:
 		return strconv.FormatInt(int64(v.Value), 10)
+	case nbt.NbtShort:
+		return strconv.FormatInt(int64(v.Value), 10)
 	case *nbt.NbtInt:
+		return strconv.FormatInt(int64(v.Value), 10)
+	case nbt.NbtInt:
 		return strconv.FormatInt(int64(v.Value), 10)
 	case *nbt.NbtLong:
 		return strconv.FormatInt(v.Value, 10)
+	case nbt.NbtLong:
+		return strconv.FormatInt(v.Value, 10)
 	case *nbt.NbtFloat:
 		return strconv.FormatFloat(float64(v.Value), 'f', -1, 32)
+	case nbt.NbtFloat:
+		return strconv.FormatFloat(float64(v.Value), 'f', -1, 32)
 	case *nbt.NbtDouble:
+		return strconv.FormatFloat(v.Value, 'f', -1, 64)
+	case nbt.NbtDouble:
 		return strconv.FormatFloat(v.Value, 'f', -1, 64)
 	case *nbt.NbtCompound:
 		return "{" + BuildCustomDataKey(v) + "}"
@@ -715,11 +764,64 @@ func FormatNbtValue(tag nbt.NbtTag) string {
 	}
 }
 
+func nbtCompoundFromTag(tag nbt.NbtTag) *nbt.NbtCompound {
+	switch v := tag.(type) {
+	case *nbt.NbtCompound:
+		return v
+	default:
+		return nil
+	}
+}
+
+func nbtStringValue(tag nbt.NbtTag) (string, bool) {
+	switch v := tag.(type) {
+	case *nbt.NbtString:
+		return v.Value, true
+	case nbt.NbtString:
+		return v.Value, true
+	default:
+		return "", false
+	}
+}
+
 func BuildCustomDataKey(compound *nbt.NbtCompound) string {
 	var segments []string
 	for key, value := range compound.Items() {
 		formattedValue := FormatNbtValue(value)
 		segments = append(segments, key+"="+formattedValue)
+	}
+
+	if len(segments) == 0 {
+		return "none"
+	}
+
+	sort.SliceStable(segments, func(i, j int) bool {
+		return strings.Compare(segments[i], segments[j]) < 0
+	})
+
+	return strings.Join(segments, "|")
+}
+
+func BuildResourceRelevantCustomDataKey(compound *nbt.NbtCompound) string {
+	if compound == nil {
+		return "none"
+	}
+
+	var segments []string
+	for key, value := range compound.Items() {
+		if !isResourceRelevantCustomDataKey(key) {
+			if nested := nbtCompoundFromTag(value); nested != nil {
+				nestedKey := BuildResourceRelevantCustomDataKey(nested)
+				if nestedKey != "empty" && nestedKey != "none" {
+					segments = append(segments, key+"={"+nestedKey+"}")
+				}
+			}
+			continue
+		}
+		formattedValue := FormatNbtValue(value)
+		if strings.TrimSpace(formattedValue) != "" {
+			segments = append(segments, key+"="+formattedValue)
+		}
 	}
 
 	if len(segments) == 0 {
@@ -731,6 +833,16 @@ func BuildCustomDataKey(compound *nbt.NbtCompound) string {
 	})
 
 	return strings.Join(segments, "|")
+}
+
+func isResourceRelevantCustomDataKey(key string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(key))
+	switch normalized {
+	case "texture", "textures", "skin", "profile", "minecraft:profile", "skullowner":
+		return true
+	default:
+		return strings.Contains(normalized, "texture")
+	}
 }
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) DetermineSourcePackId(modelPath *string, textureIds map[string]struct{}) string {
@@ -958,6 +1070,9 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) PreloadTexturePackStacks(
 }
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) GetRegisteredPacks() []texturepacks.RegisteredResourcePack {
+	if _minecraftBlockRenderer == nil || _minecraftBlockRenderer._packRegistry == nil {
+		return nil
+	}
 	output := make([]texturepacks.RegisteredResourcePack, 0, len(_minecraftBlockRenderer._packRegistry.Packs))
 	for _, pack := range _minecraftBlockRenderer._packRegistry.Packs {
 		output = append(output, pack)

@@ -98,10 +98,16 @@ func extractSkullTextureFromTagDepth(tag nbt.NbtTag, depth int) *SkullTextureInf
 
 	switch typed := tag.(type) {
 	case nbt.NbtString:
+		if !looksLikeSkullTextureText(typed.Value) {
+			return nil
+		}
 		if texture := ExtractSkullTexture(typed.Value); texture != nil {
 			return texture
 		}
 	case *nbt.NbtString:
+		if !looksLikeSkullTextureText(typed.Value) {
+			return nil
+		}
 		if texture := ExtractSkullTexture(typed.Value); texture != nil {
 			return texture
 		}
@@ -112,6 +118,12 @@ func extractSkullTextureFromTagDepth(tag nbt.NbtTag, depth int) *SkullTextureInf
 	}
 
 	return nil
+}
+
+func looksLikeSkullTextureText(value string) bool {
+	lower := strings.ToLower(value)
+	return strings.Contains(lower, "textures") &&
+		(strings.Contains(lower, "value") || strings.Contains(lower, "signature") || strings.Contains(lower, "minecraft.net/texture"))
 }
 
 func extractSkullTextureFromCompoundValue(compound *nbt.NbtCompound, depth int) *SkullTextureInfo {

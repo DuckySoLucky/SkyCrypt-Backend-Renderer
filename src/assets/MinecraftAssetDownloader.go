@@ -116,6 +116,68 @@ func (downloader *MinecraftAssetDownloader) DownloadAndExtractAssets(
 	return nil
 }
 
+func (downloader *MinecraftAssetDownloader) DownloadAssetsAsProvider(version string, outputPath string, forceRedownload bool) (ResourceProvider, error) {
+	if err := downloader.DownloadAndExtractAssets(version, outputPath, forceRedownload); err != nil {
+		return nil, err
+	}
+	assetsRoot := filepath.Join(outputPath, "assets", "minecraft")
+	if _, err := os.Stat(assetsRoot); err != nil {
+		return nil, err
+	}
+	return NewDirectoryResourceProvider(assetsRoot)
+}
+
+func (downloader *MinecraftAssetDownloader) OpenJarAsProvider(jarPath string) (ResourceProvider, error) {
+	if strings.TrimSpace(jarPath) == "" {
+		return nil, fmt.Errorf("jarPath cannot be empty")
+	}
+	provider := NewZipResourceProvider(jarPath)
+	if provider.DirectoryExists("assets/minecraft") {
+		return NewSubPathResourceProvider(provider, "assets/minecraft"), nil
+	}
+	return provider, nil
+}
+
+func (downloader *MinecraftAssetDownloader) GetAvailableVersions() ([]models.VersionInfo, error) {
+	manifest, err := downloader.fetchVersionManifest()
+	if err != nil {
+		return nil, err
+	}
+	return manifest.Versions, nil
+}
+
+func (downloader *MinecraftAssetDownloader) GetLatestVersion(includeSnapshots bool) (string, error) {
+	manifest, err := downloader.fetchVersionManifest()
+	if err != nil {
+		return "", err
+	}
+	if includeSnapshots && strings.TrimSpace(manifest.Latest.Snapshot) != "" {
+		return manifest.Latest.Snapshot, nil
+	}
+	if strings.TrimSpace(manifest.Latest.Release) == "" {
+		return "", fmt.Errorf("latest release version is missing from manifest")
+	}
+	return manifest.Latest.Release, nil
+}
+
+func (downloader *MinecraftAssetDownloader) fetchVersionManifest() (*models.VersionManifest, error) {
+	response, err := global.HTTP_CLIENT.Get(versionManifestURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch version manifest: %w", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != 200 {
+		return nil, fmt.Errorf("unexpected status code %d when fetching version manifest", response.StatusCode)
+	}
+
+	var manifest models.VersionManifest
+	if err := global.JSON.NewDecoder(response.Body).Decode(&manifest); err != nil {
+		return nil, fmt.Errorf("failed to decode version manifest: %w", err)
+	}
+	return &manifest, nil
+}
+
 func downloadFile(url string, outputPath string, forceRedownload bool) error {
 	if !forceRedownload {
 		if _, err := os.Stat(outputPath); err == nil {

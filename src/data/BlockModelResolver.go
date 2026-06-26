@@ -53,7 +53,6 @@ func (resolver *BlockModelResolver) LoadFromMinecraftAssets(assetsPath string, o
 
 	for key, def := range definitions {
 		resolver.Definitions[key] = def
-		fmt.Printf("Loaded model definition: %s\n", key)
 	}
 
 	resolver._cache = make(map[string]BlockModelInstance)
@@ -78,12 +77,22 @@ func (resolver *BlockModelResolver) Resolve(model string) *BlockModelInstance {
 	return &instance
 }
 
+func (resolver *BlockModelResolver) TryResolve(model string) (*BlockModelInstance, bool) {
+	if resolver == nil || model == "" {
+		return nil, false
+	}
+	normalizedName := resolver.NormalizeName(model)
+	if _, exists := resolver.Definitions[normalizedName]; !exists {
+		return nil, false
+	}
+	return resolver.Resolve(model), true
+}
+
 func (resolver *BlockModelResolver) ResolveInternal(model string, stack map[string]struct{}) BlockModelInstance {
 	if _, exists := stack[model]; exists {
 		panic(fmt.Sprintf("Detected circular model inheritance involving '%s'.", model))
 	}
 
-	fmt.Printf("Resolving model: %s\n", model)
 	definition, exists := resolver.Definitions[model]
 	if !exists {
 		panic(fmt.Sprintf("Model '%s' was not found in the loaded definitions.", model))
@@ -126,6 +135,7 @@ func (resolver *BlockModelResolver) ResolveInternal(model string, stack map[stri
 	}
 
 	if len(definition.Elements) > 0 {
+		elements = nil
 		for _, elementDef := range definition.Elements {
 			if convertedElement := resolver.ConvertElement(elementDef); convertedElement != nil {
 				elements = append(elements, *convertedElement)

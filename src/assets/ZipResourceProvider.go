@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -139,6 +140,7 @@ func (z *ZipResourceProvider) EnumerateFiles(directory, searchPattern string, re
 		}
 	}
 
+	sort.Strings(results)
 	return results, nil
 }
 
@@ -170,6 +172,7 @@ func (z *ZipResourceProvider) EnumerateDirectories(directory, searchPattern stri
 		}
 	}
 
+	sort.Strings(results)
 	return results, nil
 }
 
@@ -184,8 +187,10 @@ func buildIndexFromFiles(files []*zip.File) (map[string][]byte, map[string]struc
 	dirs := make(map[string]struct{})
 
 	for _, f := range files {
-		path := strings.ReplaceAll(f.Name, "\\", "/")
-		path = strings.TrimLeft(path, "/")
+		path, err := normalizePath(f.Name)
+		if err != nil {
+			continue
+		}
 		if path == "" {
 			continue
 		}
@@ -218,9 +223,27 @@ func readEntryBytes(entry *zip.File) ([]byte, error) {
 }
 
 func (z *ZipResourceProvider) GetRelativePath(fullRelativePath string, directoryPrefix string) (string, error) {
-	panic("GetRelativePath is not implemented for ZipResourceProvider because it is not needed in current usage. If you need this functionality, please implement it.")
+	normalized, err := normalizePath(fullRelativePath)
+	if err != nil {
+		return "", err
+	}
+	prefix, err := normalizePath(directoryPrefix)
+	if err != nil {
+		return "", err
+	}
+	return stripProviderDirectoryPrefix(normalized, prefix)
 }
 
 func (z *ZipResourceProvider) ReadAllText(path string) (string, error) {
-	panic("ReadAllText is not implemented for ZipResourceProvider because it is not needed in current usage. If you need this functionality, please implement it.")
+	reader, err := z.OpenRead(path)
+	if err != nil {
+		return "", err
+	}
+	defer reader.Close()
+
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }

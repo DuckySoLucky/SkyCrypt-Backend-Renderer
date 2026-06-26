@@ -1,125 +1,110 @@
 package main
 
 import (
-	minecraftblockrenderer "duckysolucky/gorenderer/src/MinecraftBlockRenderer"
+	"bytes"
+	mbr "duckysolucky/gorenderer/src/MinecraftBlockRenderer"
 	texturepacks "duckysolucky/gorenderer/src/TexturePacks"
+	"time"
+
 	"fmt"
 	"image/png"
 	"os"
 	"path/filepath"
-
-	nbt "duckysolucky/gorenderer/src/NBT"
 )
 
-func main() {
-	// var assetsPath = System.IO.Path.Combine(Directory.GetCurrentDirectory(), "minecraft", "assets", "minecraft");
+type Renderer struct {
+	r       *mbr.MinecraftBlockRenderer
+	packIDs []string
+	size    int
+}
 
-	// assetsPath := rootPath of the resource pack, which is the same as the path used to create the registry
+func NewRenderer(assetsRoot, texturePacksRoot string) (*Renderer, error) {
+	registry := texturepacks.NewTexturePackRegistry()
+	registry.RegisterAllPacks(texturePacksRoot, false)
+
+	packIDs := []string{"fsr", "hplus"}
+
+	renderer := mbr.CreateFromMinecraftAssets(assetsRoot, registry, packIDs)
+	renderer.PreloadRegisteredPacks(true)
+
+	return &Renderer{
+		r:       renderer,
+		packIDs: packIDs,
+		size:    128,
+	}, nil
+}
+
+func (s *Renderer) TextureFromSkyBlockItemID(id string) ([]byte, string, error) {
+	rendered, err := s.r.RenderSkyBlockItemID(id, &mbr.BlockRenderOptions{
+		Size:    s.size,
+		PackIds: s.packIDs,
+	})
+	if err != nil {
+		return nil, "", err
+	}
+
+	return encodeRendered(rendered)
+}
+
+func (s *Renderer) TextureFromNBT(item any) ([]byte, string, error) {
+	rendered, err := s.r.RenderItemNBT(item, &mbr.BlockRenderOptions{
+		Size:    s.size,
+		PackIds: s.packIDs,
+	})
+	if err != nil {
+		return nil, "", err
+	}
+
+	return encodeRendered(rendered)
+}
+
+func encodeRendered(rendered *mbr.RenderedResource) ([]byte, string, error) {
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, rendered.Image); err != nil {
+		return nil, "", err
+	}
+
+	return buf.Bytes(), rendered.ResourceId.ResourceId, nil
+}
+
+func main() {
 	cwd, _ := os.Getwd()
 	assetsPath := filepath.Join(cwd, "packs", "assets", "minecraft")
 	texturePacksPath := filepath.Join(cwd, "texturepacks")
 
-	registry := texturepacks.NewTexturePackRegistry()
-	registry.RegisterAllPacks(texturePacksPath, false)
-	renderer := minecraftblockrenderer.CreateFromMinecraftAssets(assetsPath, registry, nil)
-	renderer.PreloadRegisteredPacks(true)
+	renderer, err := NewRenderer(assetsPath, texturePacksPath)
+	if err != nil {
+		fmt.Printf("Error creating renderer: %v\n", err)
+		return
+	}
 
-	packs := renderer.GetLoadedResourcePacks()
+	packs := renderer.r.GetLoadedResourcePacks()
 	for _, pack := range packs {
 		fmt.Printf("Loaded resource pack: %s - (%+v)\n", pack.Pack.DisplayName, pack.Meta.Version)
 	}
 
-	// stone := renderer.RenderBlock("stone", minecraftblockrenderer.BlockRenderOptions{Size: 256})
+	timeNow := time.Now()
 
-	// dirt := renderer.RenderBlock("crafting_table", minecraftblockrenderer.BlockRenderOptions{Size: 256, EnableAntiAliasing: false})
-	// if dirt != nil {
-	// 	outputFile, err := os.Create("dirt.png")
-	// 	if err != nil {
-	// 		fmt.Printf("Error creating output file: %v\n", err)
-	// 		return
-	// 	}
-	// 	defer outputFile.Close()
-
-	// 	if err := png.Encode(outputFile, dirt); err != nil {
-	// 		fmt.Printf("Error encoding PNG: %v\n", err)
-	// 		return
-	// 	}
-
-	// 	fmt.Println("Dirt item rendered and saved as dirt.png")
-	// }
-	// diamondSword := renderer.RenderItem(
-	// 	"minecraft:diamond_sword",
-	// 	nil,
-	// 	&minecraftblockrenderer.BlockRenderOptions{Size: 256, EnableAntiAliasing: false},
-	// )
-	// if diamondSword != nil {
-	// 	outputFile, err := os.Create("diamond_sword.png")
-	// 	if err != nil {
-	// 		fmt.Printf("Error creating output file: %v\n", err)
-	// 		return
-	// 	}
-	// 	defer outputFile.Close()
-
-	// 	if err := png.Encode(outputFile, diamondSword); err != nil {
-	// 		fmt.Printf("Error encoding PNG: %v\n", err)
-	// 		return
-	// 	}
-
-	// 	fmt.Println("Diamond sword item rendered and saved as diamond_sword.png")
-	// }
-
-	// if stone != nil {
-	// 	outputFile, err := os.Create("stone.png")
-	// 	if err != nil {
-	// 		fmt.Printf("Error creating output file: %v\n", err)
-	// 		return
-	// 	}
-	// 	defer outputFile.Close()
-
-	// 	if err := png.Encode(outputFile, stone); err != nil {
-	// 		fmt.Printf("Error encoding PNG: %v\n", err)
-	// 		return
-	// 	}
-
-	// 	fmt.Println("Stone block rendered and saved as stone.png")
-
-	// }
-
-	// 	var newItemData = new MinecraftBlockRenderer.ItemRenderData(
-	// 	CustomData: new NbtCompound(new[]{
-	// 		new KeyValuePair<string, NbtTag>("id", new NbtString("ASPECT_OF_THE_VOID"))
-	// 	})
-	// );
-
-	// var newOptions = MinecraftBlockRenderer.BlockRenderOptions.Default with { PackIds = new[] { "fsr" }, ItemData = newItemData };
-
-	// var output = renderer.RenderGuiItemWithResourceId("minecraft:diamond_sword", newOptions);
-	// output.Image.Save("rendered_diamond_sword.png");
-	// Console.WriteLine("Saved rendered_diamond_sword.png");
-	newItemData := &minecraftblockrenderer.ItemRenderData{
-		CustomData: nbt.NewNbtCompound(map[string]nbt.NbtTag{
-			"id": nbt.NewNbtString("ASPECT_OF_THE_VOID"),
-		}),
+	pngBytes, cacheKey, err := renderer.TextureFromNBT(map[string]any{
+		"id":    "minecraft:iron_sword",
+		"Count": 1,
+		"tag": map[string]any{
+			"ExtraAttributes": map[string]any{
+				// "id": "HYPERION",
+				"id": "STRONG_DRAGON_HELMET",
+			},
+		},
+	})
+	if err != nil {
+		fmt.Printf("Error rendering item: %v\n", err)
+		return
 	}
-	newOptions := minecraftblockrenderer.BlockRenderOptions{
-		PackIds:  []string{"fsr"},
-		ItemData: newItemData,
-	}
-	output := renderer.RenderGuiItemWithResourceId("minecraft:diamond_sword", &newOptions)
-	if output != nil {
-		outputFile, err := os.Create("rendered_diamond_sword_with_resource_id.png")
-		if err != nil {
-			fmt.Printf("Error creating output file: %v\n", err)
-			return
-		}
-		defer outputFile.Close()
 
-		if err := png.Encode(outputFile, output.Image); err != nil {
-			fmt.Printf("Error encoding PNG: %v\n", err)
-			return
-		}
-
-		fmt.Println("Diamond sword with resource ID rendered and saved as rendered_diamond_sword_with_resource_id.png")
+	if err := os.WriteFile("midas_sword.png", pngBytes, 0644); err != nil {
+		fmt.Printf("Error writing output file: %v\n", err)
+		return
 	}
+
+	fmt.Printf("Rendered MIDAS_SWORD as midas_sword.png with cache key %s in %v\n", cacheKey, time.Since(timeNow))
 
 }

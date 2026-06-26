@@ -40,8 +40,12 @@ func (catharsisDataTypeResolver) SupportsSelectValue(dataType string) bool {
 }
 
 func (catharsisDataTypeResolver) SupportsNumericValue(dataType string) bool {
-	_ = dataType
-	return false
+	switch normalizeDataType(dataType) {
+	case "midas_weapon_paid":
+		return true
+	default:
+		return false
+	}
 }
 
 func (catharsisDataTypeResolver) EvaluateCondition(dataType string, context ItemModelContext) bool {
@@ -79,8 +83,15 @@ func (catharsisDataTypeResolver) GetNumericValue(dataType string, context ItemMo
 	if !resolver.SupportsNumericValue(dataType) {
 		return nil
 	}
-	_ = context
-	return nil
+	if context.ItemData == nil || context.ItemData.CustomData == nil {
+		return nil
+	}
+	switch normalizeDataType(dataType) {
+	case "midas_weapon_paid":
+		return getFirstNumeric(context.ItemData.CustomData, "winning_bid", "paid", "price", "midas_paid")
+	default:
+		return nil
+	}
 }
 
 func normalizeDataType(dataType string) string {
@@ -112,6 +123,25 @@ func getFirstString(compound *nbt.NbtCompound, keys ...string) *string {
 		}
 	}
 
+	return nil
+}
+
+func getFirstNumeric(compound *nbt.NbtCompound, keys ...string) *float64 {
+	if compound == nil {
+		return nil
+	}
+	for _, key := range keys {
+		if tag, ok := compound.Get(key); ok {
+			if value, okNumber := nbtTagToFloat64(tag); okNumber {
+				return &value
+			}
+			if text, okString := nbtTagToString(tag); okString {
+				if parsed, err := strconv.ParseFloat(strings.TrimSpace(text), 64); err == nil {
+					return &parsed
+				}
+			}
+		}
+	}
 	return nil
 }
 
@@ -632,7 +662,7 @@ func (s *ItemModelSelectorRangeDispatch) Resolve(context ItemModelContext) *stri
 
 	value := s.getPropertyValue(context)
 	if value == nil {
-		if s.shouldResolveFirstEntryOnUnsupportedSelector() {
+		if strings.EqualFold(s.Property, "catharsis:data_type") || s.shouldResolveFirstEntryOnUnsupportedSelector() {
 			if firstResolved := s.resolveFirstEntry(context); firstResolved != nil && strings.TrimSpace(*firstResolved) != "" {
 				return firstResolved
 			}

@@ -106,6 +106,24 @@ func (registry *ItemRegistry) TryGetModel(itemName string) (string, bool) {
 	return "", false
 }
 
+func (registry *ItemRegistry) GetAllItemNames() []string {
+	if registry == nil {
+		return nil
+	}
+
+	names := make([]string, 0, len(registry.entries))
+	for name := range registry.entries {
+		names = append(names, name)
+	}
+	return names
+}
+
+func NewItemRegistry() *ItemRegistry {
+	return &ItemRegistry{
+		entries: make(map[string]ItemInfo),
+	}
+}
+
 var ItemRegistryInstance = &ItemRegistry{
 	entries: make(map[string]ItemInfo),
 }

@@ -199,6 +199,9 @@ func NewMinecraftBlockRenderer(BlockModelResolver *data.BlockModelResolver, Text
 		_baseOverlayRoots:         BaseOverlayRoots,
 		_packRegistry:             PackRegistry,
 		_packContext:              PackContext,
+		_packRendererCache:        make(map[string]MinecraftBlockRenderer),
+		_biomeTintedTextureCache:  make(map[string]image.RGBA),
+		_playerSkinCache:          make(map[string]*image.RGBA),
 	}
 }
 
@@ -213,17 +216,17 @@ func DiscoverOverlayRoots(assetsDirectory string) []OverlayRoot {
 
 	parent := getParentDirectory(assetsDirectory)
 
-	tryAdd := func(candidate *string) {
-		if candidate == nil || *candidate == "" {
+	tryAdd := func(candidateDir string) {
+		if strings.TrimSpace(candidateDir) == "" {
 			return
 		}
 
-		fullPath, err := filepath.Abs(*candidate)
+		fullPath, err := filepath.Abs(candidateDir)
 		if err != nil {
 			return
 		}
 
-		if !os.IsNotExist(err) {
+		if info, err := os.Stat(fullPath); err != nil || !info.IsDir() {
 			return
 		}
 
@@ -237,20 +240,20 @@ func DiscoverOverlayRoots(assetsDirectory string) []OverlayRoot {
 		overlays = append(overlays, OverlayRoot{Path: fullPath, SourceId: sourceId, Kind: "CustomData"})
 	}
 
-	// Check for customdata next to the assembly (deployed with the library)
+	// Check for customdata next to the executable (deployed with the library)
 	assemblyLocation, err := os.Executable()
 	if err == nil && assemblyLocation != "" {
 		assemblyDir := filepath.Dir(assemblyLocation)
-		tryAdd(&assemblyDir)
+		tryAdd(filepath.Join(assemblyDir, "customdata"))
 	}
 
 	// Check parent directory of assets for customdata
 	if parent != nil {
-		tryAdd(parent)
+		tryAdd(filepath.Join(*parent, "customdata"))
 	}
 
 	// Check inside assets directory for customdata
-	tryAdd(&assetsDirectory)
+	tryAdd(filepath.Join(assetsDirectory, "customdata"))
 
 	return overlays
 }
@@ -421,6 +424,9 @@ func (renderer *MinecraftBlockRenderer) IsLikelyItemTexture(identifier string) b
 }
 
 func (renderer *MinecraftBlockRenderer) GetBiomeTintedTexture(textureId string, kind BiomeTintKind) *image.RGBA {
+	if renderer._biomeTintedTextureCache == nil {
+		renderer._biomeTintedTextureCache = make(map[string]image.RGBA)
+	}
 	cacheKey := fmt.Sprintf("%s|%d", renderer.NormalizeResourceKey(&textureId), kind)
 	if cached, found := renderer._biomeTintedTextureCache[cacheKey]; found {
 		return &cached

@@ -32,9 +32,9 @@ func MulMatrix(a, b Matrix4) Matrix4 {
 
 func CreateTranslation(tx, ty, tz float64) Matrix4 {
 	m := IdentityMatrix()
-	m[0][3] = tx
-	m[1][3] = ty
-	m[2][3] = tz
+	m[3][0] = tx
+	m[3][1] = ty
+	m[3][2] = tz
 	return m
 }
 
@@ -184,8 +184,8 @@ func CreateFromAxisAngle(axis data.Vector3, angle float64) Matrix4 {
 //
 //	The transformed vector.
 func Transform(relative data.Vector3, rotationMatrix Matrix4) data.Vector3 {
-	x := relative.X*rotationMatrix[0][0] + relative.Y*rotationMatrix[1][0] + relative.Z*rotationMatrix[2][0]
-	y := relative.X*rotationMatrix[0][1] + relative.Y*rotationMatrix[1][1] + relative.Z*rotationMatrix[2][1]
-	z := relative.X*rotationMatrix[0][2] + relative.Y*rotationMatrix[1][2] + relative.Z*rotationMatrix[2][2]
+	x := relative.X*rotationMatrix[0][0] + relative.Y*rotationMatrix[1][0] + relative.Z*rotationMatrix[2][0] + rotationMatrix[3][0]
+	y := relative.X*rotationMatrix[0][1] + relative.Y*rotationMatrix[1][1] + relative.Z*rotationMatrix[2][1] + rotationMatrix[3][1]
+	z := relative.X*rotationMatrix[0][2] + relative.Y*rotationMatrix[1][2] + relative.Z*rotationMatrix[2][2] + rotationMatrix[3][2]
 	return data.Vector3{X: x, Y: y, Z: z}
 }

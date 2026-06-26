@@ -151,12 +151,11 @@ func BuildNamespaceRootList(primaryRoot string, overlayRoots *[]string, assetNam
 			return
 		}
 
-		fullPath, err := os.Getwd()
+		fullPath, err := filepath.Abs(candidate)
 		if err != nil {
-			fmt.Printf("Error getting current working directory: %v\n", err)
+			fmt.Printf("Error resolving path %s: %v\n", candidate, err)
+			return
 		}
-
-		fullPath = fmt.Sprintf("%s/%s", fullPath, candidate)
 		info, err := os.Stat(fullPath)
 		if err != nil || !info.IsDir() {
 			return
@@ -195,10 +194,6 @@ func DeduplicateNamespaceRoots(roots []*assets.AssetNamespaceRoot) []*assets.Ass
 		}
 
 		path := root.Path
-		if info, err := os.Stat(path); err == nil && info.IsDir() {
-			path = fmt.Sprintf("%s/%s", path, root.Namespace)
-			// fmt.Printf("MIGHT BREAK?\n")
-		}
 
 		namespaceKey := root.Namespace
 		if namespaceKey == "" {
@@ -329,7 +324,7 @@ func MinecraftAssetLoaderLoadBlockInfos(assetsRoot string, modelDefinitions map[
 		// fmt.Printf("names: %+v\n", names)
 		for _, bsDir := range names {
 			hasAnyBlockstates = true
-			emuratedFiles, err := (*provider).EnumerateFiles(bsDir, ".json", true)
+			emuratedFiles, err := (*provider).EnumerateFiles(bsDir, "*.json", true)
 			if err != nil {
 				fmt.Printf("Error enumerating files in directory %s: %v\n", bsDir, err)
 				continue
@@ -636,7 +631,7 @@ func MinecraftAssetsLoadItemInfosFrom(assetsRoot string, models map[string]Block
 		}
 
 		info.Model = &key
-		if info.Texture != nil && strings.TrimSpace(*info.Texture) == "" && texture != nil && strings.TrimSpace(*texture) != "" {
+		if (info.Texture == nil || strings.TrimSpace(*info.Texture) == "") && texture != nil && strings.TrimSpace(*texture) != "" {
 			info.Texture = texture
 		}
 
@@ -660,7 +655,7 @@ func MinecraftAssetsLoadItemInfosFrom(assetsRoot string, models map[string]Block
 		if strings.TrimSpace(modelReference) != "" {
 			info.Model = &modelReference
 
-			if strings.TrimSpace(*info.Texture) == "" {
+			if info.Texture == nil || strings.TrimSpace(*info.Texture) == "" {
 				normalized := NormalizeModelReference(modelReference)
 				if strings.TrimSpace(normalized) != "" {
 					if definition, exists := models[normalized]; exists {
@@ -707,20 +702,20 @@ func IsTemplateItem(itemName string) bool {
 
 func EnumerateItemDefinitions(assetsRoot string, overlayRoots []string, assetNamespaces *assets.AssetNamespaceRegistry) []ItemDefinitionEntry {
 	namespaceRoots := BuildNamespaceRootList(assetsRoot, &overlayRoots, assetNamespaces, "minecraft", true)
+	var entries []ItemDefinitionEntry
 
 	for _, nsRoot := range namespaceRoots {
 		provider := *nsRoot.Provider
-		if provider == nil || !MinecraftAssetLoaderInstance.DirectoryExists(nsRoot, "items") {
+		if provider == nil || !provider.DirectoryExists("items") {
 			continue
 		}
 
-		emuratedFiles, err := provider.EnumerateFiles("items", ".json", true)
+		emuratedFiles, err := provider.EnumerateFiles("items", "*.json", true)
 		if err != nil {
 			fmt.Printf("Error enumerating files in directory %s: %v\n", "items", err)
 			continue
 		}
 
-		var entries []ItemDefinitionEntry
 		for _, file := range emuratedFiles {
 			relativePath, err := provider.GetRelativePath(file, "items")
 			if err != nil {
@@ -759,11 +754,9 @@ func EnumerateItemDefinitions(assetsRoot string, overlayRoots []string, assetNam
 
 			entries = append(entries, entry)
 		}
-
-		return entries
 	}
 
-	return nil
+	return entries
 }
 func NormalizeItemName(relativePath string) string {
 	normalized := strings.ReplaceAll(relativePath, "\\", "/")

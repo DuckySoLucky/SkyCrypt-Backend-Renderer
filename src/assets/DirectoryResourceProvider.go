@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -83,6 +84,10 @@ func (d *DirectoryResourceProvider) Close() error {
 }
 
 func (d *DirectoryResourceProvider) toFullPath(relativePath string) (string, error) {
+	if strings.TrimSpace(relativePath) == "" {
+		return d.rootPath, nil
+	}
+
 	normalized := filepath.FromSlash(relativePath)
 	combined := filepath.Join(d.rootPath, normalized)
 	fullPath, err := filepath.Abs(combined)
@@ -91,7 +96,7 @@ func (d *DirectoryResourceProvider) toFullPath(relativePath string) (string, err
 	}
 
 	rel, err := filepath.Rel(d.rootPath, fullPath)
-	if err != nil || strings.HasPrefix(rel, "..") {
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
 		return "", fmt.Errorf("path '%s' resolves outside the provider root", relativePath)
 	}
 
@@ -111,7 +116,7 @@ func (d *DirectoryResourceProvider) enumerate(directory, pattern string, recursi
 	var results []string
 	err := filepath.Walk(searchDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil
+			return err
 		}
 
 		if !recursive && path != searchDir {
@@ -130,13 +135,33 @@ func (d *DirectoryResourceProvider) enumerate(directory, pattern string, recursi
 		return nil
 	})
 
+	sort.Strings(results)
 	return results, err
 }
 
 func (d *DirectoryResourceProvider) GetRelativePath(fullRelativePath string, directoryPrefix string) (string, error) {
-	panic("GetRelativePath is not implemented for DirectoryResourceProvider")
+	normalized, err := normalizeProviderRelativePath(fullRelativePath)
+	if err != nil {
+		return "", err
+	}
+
+	prefix, err := normalizeProviderRelativePath(directoryPrefix)
+	if err != nil {
+		return "", err
+	}
+	return stripProviderDirectoryPrefix(normalized, prefix)
 }
 
 func (d *DirectoryResourceProvider) ReadAllText(path string) (string, error) {
-	panic("ReadAllText is not implemented for DirectoryResourceProvider")
+	reader, err := d.OpenRead(path)
+	if err != nil {
+		return "", err
+	}
+	defer reader.Close()
+
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
