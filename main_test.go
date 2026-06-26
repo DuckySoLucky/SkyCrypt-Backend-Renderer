@@ -7,6 +7,7 @@ import (
 	"image/color"
 	"image/png"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -115,6 +116,48 @@ func TestRenderItemNBTWebPKeepsVanillaTextureColors(t *testing.T) {
 	}
 	assertRenderedItem(t, renderer, item, mbr.VanillaPackId)
 	assertCachedWebPHasColor(t, item.Path, color.NRGBA{R: 40, G: 180, B: 220, A: 255})
+}
+
+func TestRenderItemNBTActualVanillaWebPVisibleToExternalDecoders(t *testing.T) {
+	if _, err := exec.LookPath("magick"); err != nil {
+		t.Skip("magick not available")
+	}
+	assetsRoot := filepath.Join("packs", "assets", "minecraft")
+	if _, err := os.Stat(filepath.Join(assetsRoot, "textures", "item", "diamond_sword.png")); err != nil {
+		t.Skip("local vanilla assets not available")
+	}
+
+	resourcePacksRoot := t.TempDir()
+	packRoot := filepath.Join(resourcePacksRoot, "testpack")
+	writeRootJSON(t, packRoot, "meta.json", `{"id":"testpack","name":"Test Pack","version":"test"}`)
+	writeRootJSON(t, packRoot, "pack.mcmeta", `{"pack":{"pack_format":99,"description":"test"}}`)
+	if err := os.MkdirAll(filepath.Join(packRoot, "assets", "minecraft"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(packRoot, "pack.png"), []byte{}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	renderer, err := NewRenderer(Options{
+		AssetsRoot:        assetsRoot,
+		ResourcePacksRoot: resourcePacksRoot,
+		PackIDs:           []string{"testpack"},
+		CacheDir:          t.TempDir(),
+		Size:              128,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := renderer.RenderItemNBT(map[string]any{"id": "minecraft:diamond_sword"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	decodedPath := filepath.Join(t.TempDir(), "decoded.png")
+	if out, err := exec.Command("magick", item.Path, decodedPath).CombinedOutput(); err != nil {
+		t.Fatalf("magick decode failed: %v\n%s", err, strings.TrimSpace(string(out)))
+	}
+	assertPNGHasNonBlackOpaqueColor(t, decodedPath)
 }
 
 func TestRenderSkyBlockItemIDReusesExistingWebPCache(t *testing.T) {
@@ -566,4 +609,26 @@ func sampleOpaqueColors(img image.Image, limit int) string {
 		}
 	}
 	return strings.Join(colors, ",")
+}
+
+func assertPNGHasNonBlackOpaqueColor(t testing.TB, path string) {
+	t.Helper()
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	img, _, err := image.Decode(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for y := 0; y < img.Bounds().Dy(); y++ {
+		for x := 0; x < img.Bounds().Dx(); x++ {
+			got := color.NRGBAModel.Convert(img.At(x, y)).(color.NRGBA)
+			if got.A > 0 && (got.R > 4 || got.G > 4 || got.B > 4) {
+				return
+			}
+		}
+	}
+	t.Fatalf("decoded image %s has no non-black opaque color; sample=%s", path, sampleOpaqueColors(img, 10))
 }

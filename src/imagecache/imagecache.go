@@ -13,7 +13,7 @@ import (
 	"github.com/HugoSmits86/nativewebp"
 )
 
-const CacheFormatVersion = "2"
+const CacheFormatVersion = "3"
 
 func WriteWebPAtomic(targetPath string, img image.Image) error {
 	if img == nil {
@@ -133,26 +133,14 @@ func EnsureCacheVersion(root string, version string, managedCategories ...string
 }
 
 func imageForWebP(img image.Image) image.Image {
-	switch typed := img.(type) {
-	case *image.NRGBA:
+	if typed, ok := img.(*image.NRGBA); ok && typed.Bounds().Min == image.Pt(0, 0) {
 		return typed
-	case *image.RGBA:
-		bounds := typed.Bounds()
-		nrgba := image.NewNRGBA(bounds)
-		for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-			for x := bounds.Min.X; x < bounds.Max.X; x++ {
-				sourceOffset := typed.PixOffset(x, y)
-				targetOffset := nrgba.PixOffset(x, y)
-				copy(nrgba.Pix[targetOffset:targetOffset+4], typed.Pix[sourceOffset:sourceOffset+4])
-			}
-		}
-		return nrgba
-	default:
-		bounds := img.Bounds()
-		nrgba := image.NewNRGBA(bounds)
-		draw.Draw(nrgba, bounds, img, bounds.Min, draw.Src)
-		return nrgba
 	}
+
+	bounds := img.Bounds()
+	nrgba := image.NewNRGBA(image.Rect(0, 0, bounds.Dx(), bounds.Dy()))
+	draw.Draw(nrgba, nrgba.Bounds(), img, bounds.Min, draw.Src)
+	return nrgba
 }
 
 func writeAtomic(targetPath string, write func(*os.File) error) error {
