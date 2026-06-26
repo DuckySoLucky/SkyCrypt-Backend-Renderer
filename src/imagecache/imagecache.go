@@ -17,8 +17,9 @@ func WriteWebPAtomic(targetPath string, img image.Image) error {
 	if img == nil {
 		return fmt.Errorf("image is nil")
 	}
+	encodedImage := imageForWebP(img)
 	return writeAtomic(targetPath, func(file *os.File) error {
-		return nativewebp.Encode(file, img, &nativewebp.Options{
+		return nativewebp.Encode(file, encodedImage, &nativewebp.Options{
 			CompressionLevel: nativewebp.DefaultCompression,
 		})
 	})
@@ -32,12 +33,14 @@ func WriteAnimatedWebPAtomic(targetPath string, frames []image.Image, durations 
 		return WriteWebPAtomic(targetPath, frames[0])
 	}
 
+	normalizedFrames := make([]image.Image, len(frames))
 	normalizedDurations := make([]uint, len(frames))
 	disposals := make([]uint, len(frames))
 	for i := range frames {
 		if frames[i] == nil {
 			return fmt.Errorf("animated webp frame %d is nil", i)
 		}
+		normalizedFrames[i] = imageForWebP(frames[i])
 		if i < len(durations) && durations[i] > 0 {
 			normalizedDurations[i] = durations[i]
 		} else {
@@ -46,7 +49,7 @@ func WriteAnimatedWebPAtomic(targetPath string, frames []image.Image, durations 
 	}
 
 	animation := nativewebp.Animation{
-		Images:          frames,
+		Images:          normalizedFrames,
 		Durations:       normalizedDurations,
 		Disposals:       disposals,
 		LoopCount:       0,
@@ -89,6 +92,29 @@ func KeyedDir(root string, category string, namespace string, key string) string
 func HashKey(namespace string, key string) string {
 	sum := sha256.Sum256([]byte(strings.TrimSpace(namespace) + "|" + key))
 	return hex.EncodeToString(sum[:])
+}
+
+func imageForWebP(img image.Image) image.Image {
+	switch typed := img.(type) {
+	case *image.NRGBA:
+		return typed
+	case *image.RGBA:
+		bounds := typed.Bounds()
+		nrgba := image.NewNRGBA(bounds)
+		for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+			for x := bounds.Min.X; x < bounds.Max.X; x++ {
+				sourceOffset := typed.PixOffset(x, y)
+				targetOffset := nrgba.PixOffset(x, y)
+				copy(nrgba.Pix[targetOffset:targetOffset+4], typed.Pix[sourceOffset:sourceOffset+4])
+			}
+		}
+		return nrgba
+	default:
+		bounds := img.Bounds()
+		nrgba := image.NewNRGBA(bounds)
+		draw.Draw(nrgba, bounds, img, bounds.Min, draw.Src)
+		return nrgba
+	}
 }
 
 func writeAtomic(targetPath string, write func(*os.File) error) error {
