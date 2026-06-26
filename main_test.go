@@ -173,6 +173,44 @@ func TestRenderItemNBTSkyBlockPackIgnoresVanillaDisplayTint(t *testing.T) {
 	assertPNGHasNonBlackOpaqueColor(t, renderedPNGPathFromWebP(item.Path))
 }
 
+func TestRenderItemNBTVanillaIgnoresDisplayTintOnNonTintableItem(t *testing.T) {
+	renderer := newTestRenderer(t)
+
+	item, err := renderer.RenderItemNBT(map[string]any{
+		"id": "minecraft:diamond_sword",
+		"tag": map[string]any{
+			"display": map[string]any{
+				"color": 0,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertRenderedItem(t, renderer, item, mbr.VanillaPackId)
+	assertCachedWebPHasColor(t, item.Path, color.NRGBA{R: 40, G: 180, B: 220, A: 255})
+	assertPNGHasNonBlackOpaqueColor(t, renderedPNGPathFromWebP(item.Path))
+}
+
+func TestRenderItemNBTVanillaBrewingStandIgnoresDisplayTint(t *testing.T) {
+	renderer := newTestRenderer(t)
+
+	item, err := renderer.RenderItemNBT(map[string]any{
+		"id": "minecraft:brewing_stand",
+		"tag": map[string]any{
+			"display": map[string]any{
+				"color": 0,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertRenderedItem(t, renderer, item, mbr.VanillaPackId)
+	assertCachedWebPHasColor(t, item.Path, color.NRGBA{R: 155, G: 94, B: 38, A: 255})
+	assertPNGHasNonBlackOpaqueColor(t, renderedPNGPathFromWebP(item.Path))
+}
+
 func TestRenderItemNBTWebPKeepsVanillaTextureColors(t *testing.T) {
 	renderer := newTestRenderer(t)
 
@@ -226,6 +264,49 @@ func TestRenderItemNBTActualVanillaWebPVisibleToExternalDecoders(t *testing.T) {
 		t.Fatalf("magick decode failed: %v\n%s", err, strings.TrimSpace(string(out)))
 	}
 	assertPNGHasNonBlackOpaqueColor(t, decodedPath)
+}
+
+func TestRenderItemNBTActualVanillaBrewingStandHasColor(t *testing.T) {
+	assetsRoot := filepath.Join("packs", "assets", "minecraft")
+	if _, err := os.Stat(filepath.Join(assetsRoot, "items", "brewing_stand.json")); err != nil {
+		t.Skip("local vanilla assets not available")
+	}
+
+	resourcePacksRoot := t.TempDir()
+	packRoot := filepath.Join(resourcePacksRoot, "testpack")
+	writeRootJSON(t, packRoot, "meta.json", `{"id":"testpack","name":"Test Pack","version":"test"}`)
+	writeRootJSON(t, packRoot, "pack.mcmeta", `{"pack":{"pack_format":99,"description":"test"}}`)
+	if err := os.MkdirAll(filepath.Join(packRoot, "assets", "minecraft"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(packRoot, "pack.png"), []byte{}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	renderer, err := NewRenderer(Options{
+		AssetsRoot:        assetsRoot,
+		ResourcePacksRoot: resourcePacksRoot,
+		PackIDs:           []string{"testpack"},
+		CacheDir:          t.TempDir(),
+		Size:              128,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := renderer.RenderItemNBT(map[string]any{
+		"id": "minecraft:brewing_stand",
+		"tag": map[string]any{
+			"display": map[string]any{
+				"color": 0,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertCachedWebPHasNonBlackOpaqueColor(t, item.Path)
+	assertPNGHasNonBlackOpaqueColor(t, renderedPNGPathFromWebP(item.Path))
 }
 
 func TestRenderItemNBTRealPackWebPMatchesPrerender(t *testing.T) {
@@ -583,13 +664,16 @@ func createRootMinimalAssets(t testing.TB) string {
 	}`)
 	writeRootJSON(t, root, "items/player_head.json", `{"model":{"model":"minecraft:item/player_head"}}`)
 	writeRootJSON(t, root, "items/diamond_sword.json", `{"model":{"model":"minecraft:item/diamond_sword"}}`)
+	writeRootJSON(t, root, "items/brewing_stand.json", `{"model":{"model":"minecraft:item/brewing_stand"}}`)
 	writeRootJSON(t, root, "items/clock.json", `{"model":{"model":"minecraft:item/clock"}}`)
 	writeRootJSON(t, root, "models/item/player_head.json", `{"parent":"builtin/generated","textures":{"layer0":"minecraft:item/player_head"}}`)
 	writeRootJSON(t, root, "models/item/diamond_sword.json", `{"parent":"builtin/generated","textures":{"layer0":"minecraft:item/diamond_sword"}}`)
+	writeRootJSON(t, root, "models/item/brewing_stand.json", `{"parent":"builtin/generated","textures":{"layer0":"minecraft:item/brewing_stand"}}`)
 	writeRootJSON(t, root, "models/item/clock.json", `{"parent":"builtin/generated","textures":{"layer0":"minecraft:item/clock"}}`)
 	writeRootPNG(t, filepath.Join(root, "textures", "block", "stone.png"), 16, 16, color.RGBA{R: 180, G: 30, B: 30, A: 255})
 	writeRootPNG(t, filepath.Join(root, "textures", "item", "player_head.png"), 16, 16, color.RGBA{R: 90, G: 90, B: 90, A: 255})
 	writeRootPNG(t, filepath.Join(root, "textures", "item", "diamond_sword.png"), 16, 16, color.RGBA{R: 40, G: 180, B: 220, A: 255})
+	writeRootPNG(t, filepath.Join(root, "textures", "item", "brewing_stand.png"), 16, 16, color.RGBA{R: 155, G: 94, B: 38, A: 255})
 	writeRootAnimatedPNG(t, filepath.Join(root, "textures", "item", "clock.png"))
 	writeRootJSON(t, root, "textures/item/clock.png.mcmeta", `{"animation":{"frametime":1,"width":16,"height":16}}`)
 	return root

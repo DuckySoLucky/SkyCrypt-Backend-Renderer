@@ -136,6 +136,10 @@ func (renderer *MinecraftBlockRenderer) prepareSkyBlockItemIDRender(skyBlockItem
 func (renderer *MinecraftBlockRenderer) prepareItemObjectRender(normalized *data.NormalizedItemInput) (string, *data.ItemRenderData) {
 	itemName := renderer.resolveItemObjectName(normalized)
 	itemData := buildItemObjectRenderData(normalized)
+	if normalized != nil && normalized.DisplayColor != nil && renderer.ShouldApplyNBTDisplayColor(itemName) {
+		itemData = ensureItemRenderData(itemData)
+		itemData.Layer0Tint = normalized.DisplayColor
+	}
 	return itemName, itemData
 }
 
@@ -208,9 +212,6 @@ func buildItemObjectRenderData(normalized *data.NormalizedItemInput) *data.ItemR
 	if itemData.CustomData == nil && normalized.CustomData != nil {
 		itemData.CustomData = data.DecodedMapToNbtCompound(normalized.CustomData)
 	}
-	if normalized.DisplayColor != nil {
-		itemData.Layer0Tint = normalized.DisplayColor
-	}
 	if normalized.SkullProfile != nil {
 		itemData.Profile = skullProfileMapToNbtCompound(normalized.SkullProfile)
 	}
@@ -220,6 +221,25 @@ func buildItemObjectRenderData(normalized *data.NormalizedItemInput) *data.ItemR
 	}
 
 	return itemData
+}
+
+func ensureItemRenderData(itemData *data.ItemRenderData) *data.ItemRenderData {
+	if itemData != nil {
+		return itemData
+	}
+	return &data.ItemRenderData{}
+}
+
+func (renderer *MinecraftBlockRenderer) ShouldApplyNBTDisplayColor(itemName string) bool {
+	normalized := renderer.NormalizeItemTextureKey(itemName)
+	if strings.TrimSpace(normalized) == "" {
+		return false
+	}
+
+	if _, found := LegacyDefaultTintOverrides[normalized]; found {
+		return true
+	}
+	return strings.HasPrefix(strings.ToLower(normalized), "leather_")
 }
 
 func mergeItemObjectOptions(options *BlockRenderOptions, itemData *data.ItemRenderData) *BlockRenderOptions {
