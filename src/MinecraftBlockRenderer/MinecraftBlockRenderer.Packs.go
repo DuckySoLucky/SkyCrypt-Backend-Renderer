@@ -362,7 +362,11 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) CreatePackRenderer(packSt
 	}
 	textureRepository := data.NewTextureRepository(textureRoot, nil, overlayPaths, packContext.AssetNamespaces)
 
-	return NewMinecraftBlockRenderer(modelResolver, textureRepository, blockRegistry, itemRegistry, _minecraftBlockRenderer._packContext.AssetsRoot, _minecraftBlockRenderer._baseOverlayRoots, _minecraftBlockRenderer._packRegistry, *packContext)
+	renderer := NewMinecraftBlockRenderer(modelResolver, textureRepository, blockRegistry, itemRegistry, _minecraftBlockRenderer._packContext.AssetsRoot, _minecraftBlockRenderer._baseOverlayRoots, _minecraftBlockRenderer._packRegistry, *packContext)
+	if strings.TrimSpace(_minecraftBlockRenderer._cacheDirectory) != "" {
+		renderer.SetCacheDirectory(_minecraftBlockRenderer._cacheDirectory)
+	}
+	return renderer
 }
 
 type PacksOverlayRoot struct {

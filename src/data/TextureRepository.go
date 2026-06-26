@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/assets"
 	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/global"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/imagecache"
 	"image"
 	"image/color"
 	"io"
@@ -28,6 +29,9 @@ type TextureRepository struct {
 	_embedded                map[string]string
 	_animationCache          map[string]TextureAnimation
 	_animationCacheMu        sync.RWMutex
+	_diskCacheRoot           string
+	_diskCacheNamespace      string
+	_diskCacheMu             sync.RWMutex
 
 	GrassColorMap      *image.RGBA
 	FoliageColorMap    *image.RGBA
@@ -86,6 +90,16 @@ func NewTextureRepository(dataRoot string, embeddedTextureFile *string, overlayR
 	}
 
 	return _textureRepository
+}
+
+func (_textureRepository *TextureRepository) SetDiskCacheDirectory(root string, namespace string) {
+	if _textureRepository == nil {
+		return
+	}
+	_textureRepository._diskCacheMu.Lock()
+	_textureRepository._diskCacheRoot = strings.TrimSpace(root)
+	_textureRepository._diskCacheNamespace = strings.TrimSpace(namespace)
+	_textureRepository._diskCacheMu.Unlock()
 }
 
 func (_textureRepository *TextureRepository) GetTexture(textureId string) *image.RGBA {
@@ -690,11 +704,86 @@ func (_textureRepository *TextureRepository) ProcessAnimatedTexture(normalizedKe
 		return spriteSheet
 	}
 
+	_textureRepository.hydrateAnimationFramesFromDisk(normalizedKey, animation)
+
 	_textureRepository._animationCacheMu.Lock()
 	_textureRepository._animationCache[normalizedKey] = *animation
 	_textureRepository._animationCacheMu.Unlock()
 	firstFrame := animation.Frames[0].Image
 	return firstFrame
+}
+
+func (_textureRepository *TextureRepository) hydrateAnimationFramesFromDisk(normalizedKey string, animation *TextureAnimation) {
+	if _textureRepository == nil || animation == nil || len(animation.Frames) == 0 {
+		return
+	}
+	for i := range animation.Frames {
+		path := _textureRepository.animationFrameCachePath(normalizedKey, i)
+		if path == "" {
+			return
+		}
+		if cached, err := imagecache.ReadRGBA(path); err == nil {
+			animation.Frames[i].Image = *cached
+			continue
+		} else if !os.IsNotExist(err) {
+			_ = os.Remove(path)
+		}
+		_ = imagecache.WriteWebPAtomic(path, &animation.Frames[i].Image)
+	}
+}
+
+func (_textureRepository *TextureRepository) tryReadDerivedTexture(key string) (*image.RGBA, bool) {
+	path := _textureRepository.derivedTextureCachePath(key)
+	if path == "" {
+		return nil, false
+	}
+	cached, err := imagecache.ReadRGBA(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			_ = os.Remove(path)
+		}
+		return nil, false
+	}
+	return cached, true
+}
+
+func (_textureRepository *TextureRepository) tryWriteDerivedTexture(key string, img image.Image) {
+	path := _textureRepository.derivedTextureCachePath(key)
+	if path == "" || img == nil {
+		return
+	}
+	_ = imagecache.WriteWebPAtomic(path, img)
+}
+
+func (_textureRepository *TextureRepository) derivedTextureCachePath(key string) string {
+	root, namespace := _textureRepository.diskCacheConfig()
+	if root == "" {
+		return ""
+	}
+	return imagecache.KeyedPath(root, "textures", namespace, key)
+}
+
+func (_textureRepository *TextureRepository) animationFrameCachePath(key string, frameIndex int) string {
+	root, namespace := _textureRepository.diskCacheConfig()
+	if root == "" {
+		return ""
+	}
+	dir := imagecache.KeyedDir(root, "animations", namespace, key)
+	return filepath.Join(dir, fmt.Sprintf("frame-%03d.webp", frameIndex))
+}
+
+func (_textureRepository *TextureRepository) diskCacheConfig() (string, string) {
+	if _textureRepository == nil {
+		return "", ""
+	}
+	_textureRepository._diskCacheMu.RLock()
+	root := _textureRepository._diskCacheRoot
+	namespace := _textureRepository._diskCacheNamespace
+	_textureRepository._diskCacheMu.RUnlock()
+	if strings.TrimSpace(namespace) == "" {
+		namespace = "vanilla"
+	}
+	return root, namespace
 }
 
 type TextureAnimation struct {
@@ -926,6 +1015,9 @@ func (_textureRepository *TextureRepository) TryGenerateArmorTrimTexture(normali
 	if !strings.HasPrefix(strings.ToLower(normalized), "trims/items/") {
 		return image.RGBA{}, false
 	}
+	if cached, ok := _textureRepository.tryReadDerivedTexture("trim|" + normalized); ok {
+		return *cached, true
+	}
 
 	// TODO: MIGHT BE BROKEN, SHOULD BE FILE NAME
 	fileName := normalized[strings.LastIndex(normalized, "/")+1:]
@@ -996,6 +1088,7 @@ func (_textureRepository *TextureRepository) TryGenerateArmorTrimTexture(normali
 		}
 	}
 
+	_textureRepository.tryWriteDerivedTexture("trim|"+normalized, tinted)
 	return *tinted, true
 }
 
@@ -1057,6 +1150,17 @@ func (_textureRepository *TextureRepository) GetTintedTexture(textureId string, 
 	}
 	_textureRepository._cacheMu.RUnlock()
 
+	if cached, ok := _textureRepository.tryReadDerivedTexture("tint|" + cacheKey); ok {
+		_textureRepository._cacheMu.Lock()
+		if existing, found := _textureRepository._cache[cacheKey]; found {
+			_textureRepository._cacheMu.Unlock()
+			return &existing
+		}
+		_textureRepository._cache[cacheKey] = *cached
+		_textureRepository._cacheMu.Unlock()
+		return cached
+	}
+
 	original := _textureRepository.GetTexture(textureId)
 	if original == nil || sameRGBA(*original, _textureRepository._missingTexture) {
 		_textureRepository._cacheMu.Lock()
@@ -1108,6 +1212,7 @@ func (_textureRepository *TextureRepository) GetTintedTexture(textureId string, 
 	}
 	_textureRepository._cache[cacheKey] = *tinted
 	_textureRepository._cacheMu.Unlock()
+	_textureRepository.tryWriteDerivedTexture("tint|"+cacheKey, tinted)
 	return tinted
 }
 

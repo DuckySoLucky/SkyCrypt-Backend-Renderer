@@ -7,6 +7,8 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	mbr "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/MinecraftBlockRenderer"
@@ -17,9 +19,21 @@ func TestNewRendererRequiresPackIDs(t *testing.T) {
 	_, err := NewRenderer(Options{
 		AssetsRoot:        "assets",
 		ResourcePacksRoot: "resourcepacks",
+		CacheDir:          t.TempDir(),
 	})
 	if err == nil {
 		t.Fatal("expected missing pack IDs to return an error")
+	}
+}
+
+func TestNewRendererRequiresCacheDir(t *testing.T) {
+	_, err := NewRenderer(Options{
+		AssetsRoot:        "assets",
+		ResourcePacksRoot: "resourcepacks",
+		PackIDs:           []string{"testpack"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "cache dir is required") {
+		t.Fatalf("expected cache dir error, got %v", err)
 	}
 }
 
@@ -35,13 +49,183 @@ func TestRendererPackIDsReturnsCopy(t *testing.T) {
 	}
 }
 
-func TestPreRenderSkyBlockItemIDsWritesPNGCache(t *testing.T) {
+func TestRenderSkyBlockItemIDWritesWebPCache(t *testing.T) {
 	renderer := newTestRenderer(t)
-	outputDir := t.TempDir()
 
-	result, err := renderer.PreRenderSkyBlockItemIDs(context.Background(), []string{"HYPERION"}, PreRenderOptions{
-		OutputDir: outputDir,
-		Workers:   2,
+	item, err := renderer.RenderSkyBlockItemID("TEST_ITEM")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertRenderedItem(t, renderer, item, "testpack")
+}
+
+func TestRenderItemNBTWritesWebPCache(t *testing.T) {
+	renderer := newTestRenderer(t)
+
+	item, err := renderer.RenderItemNBT(map[string]any{
+		"id": "minecraft:player_head",
+		"tag": map[string]any{
+			"ExtraAttributes": map[string]any{
+				"id": "TEST_ITEM",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertRenderedItem(t, renderer, item, mbr.VanillaPackId)
+}
+
+func TestRenderSkyBlockItemIDReusesExistingWebPCache(t *testing.T) {
+	renderer := newTestRenderer(t)
+
+	first, err := renderer.RenderSkyBlockItemID("TEST_ITEM")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(first.Path, []byte("sentinel"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := renderer.RenderSkyBlockItemID("TEST_ITEM")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Path != first.Path || second.TexturePackID != first.TexturePackID {
+		t.Fatalf("cache hit changed result: first=%#v second=%#v", first, second)
+	}
+	data, err := os.ReadFile(first.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "sentinel" {
+		t.Fatal("existing webp cache file was overwritten")
+	}
+}
+
+func TestRenderSkyBlockItemIDMemoryCacheDoesNotStatFile(t *testing.T) {
+	renderer := newTestRenderer(t)
+
+	first, err := renderer.RenderSkyBlockItemID("TEST_ITEM")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(first.Path); err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := renderer.RenderSkyBlockItemID("TEST_ITEM")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Path != first.Path || second.TexturePackID != first.TexturePackID {
+		t.Fatalf("memory cache changed result: first=%#v second=%#v", first, second)
+	}
+}
+
+func TestRenderSkyBlockItemIDConcurrentCallsShareResult(t *testing.T) {
+	renderer := newTestRenderer(t)
+	const calls = 8
+	start := make(chan struct{})
+	results := make([]*RenderedItem, calls)
+	errs := make([]error, calls)
+	var wg sync.WaitGroup
+
+	for i := 0; i < calls; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			<-start
+			results[index], errs[index] = renderer.RenderSkyBlockItemID("TEST_ITEM")
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("call %d failed: %v", i, err)
+		}
+	}
+	for i := 1; i < calls; i++ {
+		if results[i].Path != results[0].Path || results[i].TexturePackID != results[0].TexturePackID {
+			t.Fatalf("concurrent call %d returned different result: %#v != %#v", i, results[i], results[0])
+		}
+	}
+	assertWebPFile(t, results[0].Path)
+}
+
+func TestRenderItemNBTWritesAnimatedWebP(t *testing.T) {
+	renderer := newTestRenderer(t)
+
+	item, err := renderer.RenderItemNBT(map[string]any{
+		"id": "clock",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.Path == "" || item.TexturePackID == "" {
+		t.Fatalf("unexpected rendered item: %#v", item)
+	}
+	assertWebPFile(t, item.Path)
+	data, err := os.ReadFile(item.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "ANIM") || !strings.Contains(string(data), "ANMF") {
+		t.Fatal("animated webp does not contain ANIM/ANMF chunks")
+	}
+}
+
+func TestPlayerSkinCacheUsesConfiguredWebPDirectory(t *testing.T) {
+	renderer := newTestRenderer(t)
+	skin := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	for y := 0; y < 2; y++ {
+		for x := 0; x < 2; x++ {
+			skin.SetRGBA(x, y, color.RGBA{R: 30, G: 80, B: 120, A: 255})
+		}
+	}
+
+	normalizedURL := "https://textures.minecraft.net/texture/test-skin"
+	renderer.MinecraftRenderer().TryPersistSkin(normalizedURL, skin)
+	path := renderer.MinecraftRenderer().GetSkinCachePath(normalizedURL)
+	if path == nil {
+		t.Fatal("skin cache path is nil")
+	}
+	if filepath.Ext(*path) != ".webp" {
+		t.Fatalf("skin cache extension = %q, want .webp", filepath.Ext(*path))
+	}
+	expectedPrefix := filepath.Join(renderer.cacheDir, "player_skins") + string(os.PathSeparator)
+	if !strings.HasPrefix(*path, expectedPrefix) {
+		t.Fatalf("skin cache path %q is not under %q", *path, expectedPrefix)
+	}
+	assertWebPFile(t, *path)
+	if _, ok := renderer.MinecraftRenderer().TryLoadSkinFromDisk(normalizedURL); !ok {
+		t.Fatal("persisted webp skin was not readable")
+	}
+}
+
+func TestAnimatedTextureFramesUseDerivedCache(t *testing.T) {
+	renderer := newTestRenderer(t)
+
+	if _, err := renderer.RenderItemNBT(map[string]any{"id": "clock"}); err != nil {
+		t.Fatal(err)
+	}
+	matches, err := filepath.Glob(filepath.Join(renderer.cacheDir, "derived", "animations", "*", "frame-000.webp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) == 0 {
+		t.Fatal("expected animated texture frame cache files")
+	}
+	assertWebPFile(t, matches[0])
+}
+
+func TestPreRenderSkyBlockItemIDsWritesWebPCache(t *testing.T) {
+	renderer := newTestRenderer(t)
+
+	result, err := renderer.PreRenderSkyBlockItemIDs(context.Background(), []string{"TEST_ITEM"}, PreRenderOptions{
+		Workers: 2,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -50,27 +234,17 @@ func TestPreRenderSkyBlockItemIDsWritesPNGCache(t *testing.T) {
 		t.Fatalf("result counts = %d succeeded, %d failed", result.Succeeded, result.Failed)
 	}
 	entry := result.Entries[0]
-	if entry.InputID != "HYPERION" || entry.ResourceID == "" || entry.Path == "" || entry.Error != "" {
+	if entry.InputID != "TEST_ITEM" || entry.TexturePackID != "testpack" || entry.Path == "" || entry.Error != "" {
 		t.Fatalf("unexpected entry: %#v", entry)
 	}
-	if _, err := os.Stat(entry.Path); err != nil {
-		t.Fatal(err)
-	}
-	file, err := os.Open(entry.Path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer file.Close()
-	if _, err := png.Decode(file); err != nil {
-		t.Fatalf("cache file is not a png: %v", err)
-	}
+	assertRenderedPath(t, renderer, entry.Path)
+	assertWebPFile(t, entry.Path)
 }
 
 func TestPreRenderSkyBlockItemIDsSkipsExistingUnlessOverwrite(t *testing.T) {
 	renderer := newTestRenderer(t)
-	outputDir := t.TempDir()
 
-	first, err := renderer.PreRenderSkyBlockItemIDs(context.Background(), []string{"TEST_ITEM"}, PreRenderOptions{OutputDir: outputDir})
+	first, err := renderer.PreRenderSkyBlockItemIDs(context.Background(), []string{"TEST_ITEM"}, PreRenderOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +253,7 @@ func TestPreRenderSkyBlockItemIDsSkipsExistingUnlessOverwrite(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	skipped, err := renderer.PreRenderSkyBlockItemIDs(context.Background(), []string{"TEST_ITEM"}, PreRenderOptions{OutputDir: outputDir})
+	skipped, err := renderer.PreRenderSkyBlockItemIDs(context.Background(), []string{"TEST_ITEM"}, PreRenderOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,28 +269,19 @@ func TestPreRenderSkyBlockItemIDsSkipsExistingUnlessOverwrite(t *testing.T) {
 	}
 
 	overwritten, err := renderer.PreRenderSkyBlockItemIDs(context.Background(), []string{"TEST_ITEM"}, PreRenderOptions{
-		OutputDir: outputDir,
 		Overwrite: true,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	file, err := os.Open(overwritten.Entries[0].Path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer file.Close()
-	if _, err := png.Decode(file); err != nil {
-		t.Fatalf("overwrite did not restore png content: %v", err)
-	}
+	assertWebPFile(t, overwritten.Entries[0].Path)
 }
 
 func TestPreRenderSkyBlockItemIDsPreservesDuplicates(t *testing.T) {
 	renderer := newTestRenderer(t)
 
 	result, err := renderer.PreRenderSkyBlockItemIDs(context.Background(), []string{"TEST_ITEM", "TEST_ITEM"}, PreRenderOptions{
-		OutputDir: t.TempDir(),
-		Workers:   2,
+		Workers: 2,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -124,20 +289,18 @@ func TestPreRenderSkyBlockItemIDsPreservesDuplicates(t *testing.T) {
 	if len(result.Entries) != 2 || result.Succeeded != 2 {
 		t.Fatalf("unexpected result: %#v", result)
 	}
-	if result.Entries[0].ResourceID == "" || result.Entries[0].ResourceID != result.Entries[1].ResourceID {
-		t.Fatalf("duplicate entries did not share resource id: %#v", result.Entries)
-	}
-	if result.Entries[0].Path != result.Entries[1].Path {
+	if result.Entries[0].Path == "" || result.Entries[0].Path != result.Entries[1].Path {
 		t.Fatalf("duplicate entries did not share cache path: %#v", result.Entries)
+	}
+	if result.Entries[0].TexturePackID != result.Entries[1].TexturePackID {
+		t.Fatalf("duplicate entries did not share texture pack id: %#v", result.Entries)
 	}
 }
 
 func TestPreRenderSkyBlockItemIDsReportsEntryErrors(t *testing.T) {
 	renderer := newTestRenderer(t)
 
-	result, err := renderer.PreRenderSkyBlockItemIDs(context.Background(), []string{"TEST_ITEM", " "}, PreRenderOptions{
-		OutputDir: t.TempDir(),
-	})
+	result, err := renderer.PreRenderSkyBlockItemIDs(context.Background(), []string{"TEST_ITEM", " "}, PreRenderOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,9 +317,7 @@ func TestPreRenderSkyBlockItemIDsHonorsCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	result, err := renderer.PreRenderSkyBlockItemIDs(ctx, []string{"TEST_ITEM"}, PreRenderOptions{
-		OutputDir: t.TempDir(),
-	})
+	result, err := renderer.PreRenderSkyBlockItemIDs(ctx, []string{"TEST_ITEM"}, PreRenderOptions{})
 	if err == nil {
 		t.Fatal("expected cancellation error")
 	}
@@ -174,11 +335,16 @@ func newTestRenderer(t testing.TB) *Renderer {
 	if _, err := registry.RegisterPack(packRoot); err != nil {
 		t.Fatal(err)
 	}
+	cacheDir := filepath.Join(t.TempDir(), "cache")
 	blockRenderer := mbr.CreateFromMinecraftAssets(assetsRoot, registry, []string{"testpack"})
+	blockRenderer.SetCacheDirectory(cacheDir)
 	return &Renderer{
-		renderer: blockRenderer,
-		packIDs:  []string{"testpack"},
-		size:     32,
+		renderer:    blockRenderer,
+		packIDs:     []string{"testpack"},
+		size:        32,
+		cacheDir:    cacheDir,
+		renderCache: make(map[string]RenderedItem),
+		inflight:    make(map[string]*renderInflight),
 	}
 }
 
@@ -194,9 +360,13 @@ func createRootMinimalAssets(t testing.TB) string {
 		}}]
 	}`)
 	writeRootJSON(t, root, "items/player_head.json", `{"model":{"model":"minecraft:item/player_head"}}`)
+	writeRootJSON(t, root, "items/clock.json", `{"model":{"model":"minecraft:item/clock"}}`)
 	writeRootJSON(t, root, "models/item/player_head.json", `{"parent":"builtin/generated","textures":{"layer0":"minecraft:item/player_head"}}`)
+	writeRootJSON(t, root, "models/item/clock.json", `{"parent":"builtin/generated","textures":{"layer0":"minecraft:item/clock"}}`)
 	writeRootPNG(t, filepath.Join(root, "textures", "block", "stone.png"), 16, 16, color.RGBA{R: 180, G: 30, B: 30, A: 255})
 	writeRootPNG(t, filepath.Join(root, "textures", "item", "player_head.png"), 16, 16, color.RGBA{R: 90, G: 90, B: 90, A: 255})
+	writeRootAnimatedPNG(t, filepath.Join(root, "textures", "item", "clock.png"))
+	writeRootJSON(t, root, "textures/item/clock.png.mcmeta", `{"animation":{"frametime":1,"frames":[0,1],"width":16,"height":16}}`)
 	return root
 }
 
@@ -207,8 +377,12 @@ func createRootSkyblockPack(t testing.TB, id string) string {
 	writeRootJSON(t, root, "pack.mcmeta", `{"pack":{"pack_format":99,"description":"test"}}`)
 	writeRootJSON(t, root, "assets/minecraft/items/player_head.json", `{"model":{"model":"minecraft:item/player_head"}}`)
 	writeRootJSON(t, root, "assets/skyblock/items/test_item.json", `{"model":{"type":"model","model":"firmskyblock:item/test_item"}}`)
+	writeRootJSON(t, root, "assets/skyblock/items/animated_item.json", `{"model":{"type":"model","model":"firmskyblock:item/animated_item"}}`)
 	writeRootJSON(t, root, "assets/firmskyblock/models/item/test_item.json", `{"parent":"builtin/generated","textures":{"layer0":"firmskyblock:item/test_item"}}`)
+	writeRootJSON(t, root, "assets/firmskyblock/models/item/animated_item.json", `{"parent":"builtin/generated","textures":{"layer0":"firmskyblock:item/animated_item"}}`)
 	writeRootPNG(t, filepath.Join(root, "assets", "firmskyblock", "textures", "item", "test_item.png"), 16, 16, color.RGBA{R: 40, G: 180, B: 220, A: 255})
+	writeRootAnimatedPNG(t, filepath.Join(root, "assets", "firmskyblock", "textures", "item", "animated_item.png"))
+	writeRootJSON(t, root, "assets/firmskyblock/textures/item/animated_item.png.mcmeta", `{"animation":{"frametime":1,"frames":[0,1],"width":16,"height":16}}`)
 	if err := os.WriteFile(filepath.Join(root, "pack.png"), []byte{}, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -244,5 +418,58 @@ func writeRootPNG(t testing.TB, path string, width int, height int, c color.RGBA
 	defer file.Close()
 	if err := png.Encode(file, img); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func writeRootAnimatedPNG(t testing.TB, path string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	img := image.NewRGBA(image.Rect(0, 0, 16, 32))
+	for y := 0; y < 16; y++ {
+		for x := 0; x < 16; x++ {
+			img.SetRGBA(x, y, color.RGBA{R: 220, G: 40, B: 40, A: 255})
+			img.SetRGBA(x, y+16, color.RGBA{R: 40, G: 220, B: 80, A: 255})
+		}
+	}
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if err := png.Encode(file, img); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertRenderedItem(t testing.TB, renderer *Renderer, item *RenderedItem, texturePackID string) {
+	t.Helper()
+	if item == nil || item.Path == "" || item.TexturePackID != texturePackID {
+		t.Fatalf("unexpected rendered item: %#v", item)
+	}
+	assertRenderedPath(t, renderer, item.Path)
+	assertWebPFile(t, item.Path)
+}
+
+func assertRenderedPath(t testing.TB, renderer *Renderer, path string) {
+	t.Helper()
+	if filepath.Ext(path) != ".webp" {
+		t.Fatalf("cache extension = %q, want .webp", filepath.Ext(path))
+	}
+	expectedPrefix := filepath.Join(renderer.cacheDir, "rendered") + string(os.PathSeparator)
+	if !strings.HasPrefix(path, expectedPrefix) {
+		t.Fatalf("render path %q is not under %q", path, expectedPrefix)
+	}
+}
+
+func assertWebPFile(t testing.TB, path string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) < 12 || string(data[:4]) != "RIFF" || string(data[8:12]) != "WEBP" {
+		t.Fatalf("file is not a webp: %s", path)
 	}
 }

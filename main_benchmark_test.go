@@ -9,13 +9,11 @@ import (
 func BenchmarkPreRenderSkyBlockItemIDs(b *testing.B) {
 	renderer := newTestRenderer(b)
 	ids := []string{"HYPERION", "INFERNO_HELMET", "DIRT", "CROWN_OF_AVARICE"}
-	outputDir := b.TempDir()
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, err := renderer.PreRenderSkyBlockItemIDs(context.Background(), ids, PreRenderOptions{
-			OutputDir: outputDir,
 			Workers:   runtime.GOMAXPROCS(0),
 			Overwrite: true,
 		})

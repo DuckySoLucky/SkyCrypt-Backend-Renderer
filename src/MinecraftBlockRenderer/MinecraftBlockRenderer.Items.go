@@ -1,7 +1,6 @@
 package minecraftblockrenderer
 
 import (
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -10,9 +9,9 @@ import (
 	nbt "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/NBT"
 	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
 	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/global"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/imagecache"
 	"image"
 	"image/color"
-	"image/png"
 	"math"
 	"net/http"
 	"net/url"
@@ -1148,13 +1147,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryLoadSkinFromDisk(norma
 		return image.RGBA{}, false
 	}
 
-	file, err := os.Open(*path)
-	if err != nil {
-		return image.RGBA{}, false
-	}
-	defer file.Close()
-
-	imageFromDisk, err := data.LoadImageFromStream(file)
+	imageFromDisk, err := imagecache.ReadRGBA(*path)
 	if err == nil {
 		return *imageFromDisk, true
 	}
@@ -1193,20 +1186,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryPersistSkin(normalized
 		return
 	}
 
-	directory := filepath.Dir(*path)
-	if strings.TrimSpace(directory) != "" {
-		if err := os.MkdirAll(directory, 0o755); err != nil {
-			return
-		}
-	}
-
-	file, err := os.Create(*path)
-	if err != nil {
-		return
-	}
-	defer file.Close()
-
-	_ = png.Encode(file, skin)
+	_ = imagecache.WriteWebPAtomic(*path, skin)
 }
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) GetSkinCachePath(normalizedURL string) *string {
@@ -1220,21 +1200,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) GetSkinCachePath(normaliz
 }
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) GetSkinCacheFileName(normalizedURL string) string {
-	if parsed, err := url.Parse(normalizedURL); err == nil {
-		segments := strings.Split(strings.Trim(parsed.Path, "/"), "/")
-		if len(segments) > 0 {
-			lastSegment := strings.TrimSpace(segments[len(segments)-1])
-			if lastSegment != "" {
-				if strings.HasSuffix(strings.ToLower(lastSegment), ".png") {
-					return lastSegment
-				}
-				return lastSegment + ".png"
-			}
-		}
-	}
-
-	hash := sha256.Sum256([]byte(normalizedURL))
-	return strings.ToUpper(hex.EncodeToString(hash[:])) + ".png"
+	return imagecache.HashKey("player_skin", normalizedURL) + ".webp"
 }
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryGetDefaultPlayerSkin() (*image.RGBA, bool) {

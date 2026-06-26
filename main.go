@@ -1,11 +1,9 @@
 package renderer
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"image"
-	"image/png"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -14,6 +12,7 @@ import (
 
 	mbr "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/MinecraftBlockRenderer"
 	texturepacks "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/TexturePacks"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/imagecache"
 )
 
 const (
@@ -26,24 +25,24 @@ type Options struct {
 	PackIDs           []string
 	Size              int
 	Preload           bool
+	CacheDir          string
 }
 
-type RenderedPNG struct {
-	PNG        []byte
-	ResourceID string
+type RenderedItem struct {
+	Path          string
+	TexturePackID string
 }
 
 type PreRenderOptions struct {
-	OutputDir string
 	Workers   int
 	Overwrite bool
 }
 
 type PreRenderedItem struct {
-	InputID    string
-	ResourceID string
-	Path       string
-	Error      string
+	InputID       string
+	Path          string
+	TexturePackID string
+	Error         string
 }
 
 type PreRenderResult struct {
@@ -56,6 +55,18 @@ type Renderer struct {
 	renderer *mbr.MinecraftBlockRenderer
 	packIDs  []string
 	size     int
+	cacheDir string
+
+	renderCache   map[string]RenderedItem
+	renderCacheMu sync.RWMutex
+	inflight      map[string]*renderInflight
+	inflightMu    sync.Mutex
+}
+
+type renderInflight struct {
+	wg   sync.WaitGroup
+	item *RenderedItem
+	err  error
 }
 
 func NewRenderer(options Options) (*Renderer, error) {
@@ -72,6 +83,10 @@ func NewRendererWithOptions(options Options) (*Renderer, error) {
 	if len(options.PackIDs) == 0 {
 		return nil, fmt.Errorf("at least one pack id is required")
 	}
+	cacheDir := strings.TrimSpace(options.CacheDir)
+	if cacheDir == "" {
+		return nil, fmt.Errorf("cache dir is required")
+	}
 
 	size := options.Size
 	if size <= 0 {
@@ -84,14 +99,20 @@ func NewRendererWithOptions(options Options) (*Renderer, error) {
 	registry.RegisterAllPacks(options.ResourcePacksRoot, false)
 
 	blockRenderer := mbr.CreateFromMinecraftAssets(options.AssetsRoot, registry, packIDs)
+	blockRenderer.SetCacheDirectory(cacheDir)
 	if options.Preload {
 		blockRenderer.PreloadRegisteredPacks(true)
 	}
 
 	return &Renderer{
-		renderer: blockRenderer,
-		packIDs:  packIDs,
-		size:     size,
+		renderer:      blockRenderer,
+		packIDs:       packIDs,
+		size:          size,
+		cacheDir:      cacheDir,
+		renderCache:   make(map[string]RenderedItem),
+		inflight:      make(map[string]*renderInflight),
+		renderCacheMu: sync.RWMutex{},
+		inflightMu:    sync.Mutex{},
 	}, nil
 }
 
@@ -116,56 +137,32 @@ func (r *Renderer) MinecraftRenderer() *mbr.MinecraftBlockRenderer {
 	return r.renderer
 }
 
-func (r *Renderer) RenderSkyBlockItemID(id string) (*mbr.RenderedResource, error) {
+func (r *Renderer) RenderSkyBlockItemID(id string) (*RenderedItem, error) {
+	return r.cachedSkyBlockItemID(id, false)
+}
+
+func (r *Renderer) RenderItemNBT(item any) (*RenderedItem, error) {
 	if r == nil || r.renderer == nil {
 		return nil, fmt.Errorf("renderer is nil")
 	}
-	return r.renderer.RenderSkyBlockItemID(id, &mbr.BlockRenderOptions{
-		Size:    r.Size(),
-		PackIds: r.packIDs,
-	})
+	options := r.renderOptions()
+	return r.cachedRenderedItem(
+		false,
+		func() (*mbr.ResourceIdResult, error) {
+			return r.renderer.ComputeResourceIdFromNBT(item, options)
+		},
+		func() (*mbr.AnimatedRenderedResource, error) {
+			return r.renderer.RenderAnimatedItemNBT(item, options)
+		},
+	)
 }
 
-func (r *Renderer) RenderItemNBT(item any) (*mbr.RenderedResource, error) {
-	if r == nil || r.renderer == nil {
-		return nil, fmt.Errorf("renderer is nil")
-	}
-	return r.renderer.RenderItemNBT(item, &mbr.BlockRenderOptions{
-		Size:    r.Size(),
-		PackIds: r.packIDs,
-	})
+func (r *Renderer) FileFromSkyBlockItemID(id string) (*RenderedItem, error) {
+	return r.RenderSkyBlockItemID(id)
 }
 
-func (r *Renderer) TextureFromSkyBlockItemID(id string) ([]byte, string, error) {
-	rendered, err := r.RenderSkyBlockItemID(id)
-	if err != nil {
-		return nil, "", err
-	}
-	return EncodeRendered(rendered)
-}
-
-func (r *Renderer) TextureFromNBT(item any) ([]byte, string, error) {
-	rendered, err := r.RenderItemNBT(item)
-	if err != nil {
-		return nil, "", err
-	}
-	return EncodeRendered(rendered)
-}
-
-func (r *Renderer) PNGFromSkyBlockItemID(id string) (*RenderedPNG, error) {
-	pngBytes, resourceID, err := r.TextureFromSkyBlockItemID(id)
-	if err != nil {
-		return nil, err
-	}
-	return &RenderedPNG{PNG: pngBytes, ResourceID: resourceID}, nil
-}
-
-func (r *Renderer) PNGFromNBT(item any) (*RenderedPNG, error) {
-	pngBytes, resourceID, err := r.TextureFromNBT(item)
-	if err != nil {
-		return nil, err
-	}
-	return &RenderedPNG{PNG: pngBytes, ResourceID: resourceID}, nil
+func (r *Renderer) FileFromNBT(item any) (*RenderedItem, error) {
+	return r.RenderItemNBT(item)
 }
 
 func (r *Renderer) PreRenderSkyBlockItemIDs(ctx context.Context, ids []string, options PreRenderOptions) (*PreRenderResult, error) {
@@ -175,11 +172,7 @@ func (r *Renderer) PreRenderSkyBlockItemIDs(ctx context.Context, ids []string, o
 	if r == nil || r.renderer == nil {
 		return nil, fmt.Errorf("renderer is nil")
 	}
-	outputDir := strings.TrimSpace(options.OutputDir)
-	if outputDir == "" {
-		return nil, fmt.Errorf("output dir is required")
-	}
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+	if _, err := r.requireCacheDir(); err != nil {
 		return nil, err
 	}
 
@@ -210,59 +203,22 @@ func (r *Renderer) PreRenderSkyBlockItemIDs(ctx context.Context, ids []string, o
 	}
 
 	type renderResult struct {
-		inputID    string
-		resourceID string
-		path       string
-		err        error
+		inputID string
+		item    *RenderedItem
+		err     error
 	}
 
 	jobs := make(chan string)
 	results := make(chan renderResult)
 	workerCount := minInt(workers, maxInt(1, len(uniqueIDs)))
 	var wg sync.WaitGroup
-	writtenByResourceID := make(map[string]string)
-	var writtenMu sync.Mutex
 
 	renderOne := func(id string) renderResult {
 		if err := ctx.Err(); err != nil {
 			return renderResult{inputID: id, err: err}
 		}
-
-		rendered, err := r.RenderSkyBlockItemID(id)
-		if err != nil {
-			return renderResult{inputID: id, err: err}
-		}
-		if rendered == nil || rendered.Image == nil || strings.TrimSpace(rendered.ResourceId.ResourceId) == "" {
-			return renderResult{inputID: id, err: fmt.Errorf("failed to render item")}
-		}
-
-		resourceID := rendered.ResourceId.ResourceId
-		targetPath := filepath.Join(outputDir, resourceID+".png")
-
-		writtenMu.Lock()
-		if existingPath, found := writtenByResourceID[resourceID]; found {
-			writtenMu.Unlock()
-			return renderResult{inputID: id, resourceID: resourceID, path: existingPath}
-		}
-		if !options.Overwrite {
-			if _, statErr := os.Stat(targetPath); statErr == nil {
-				writtenByResourceID[resourceID] = targetPath
-				writtenMu.Unlock()
-				return renderResult{inputID: id, resourceID: resourceID, path: targetPath}
-			} else if !os.IsNotExist(statErr) {
-				writtenMu.Unlock()
-				return renderResult{inputID: id, resourceID: resourceID, err: statErr}
-			}
-		}
-
-		if err := writeRenderedPNGAtomic(targetPath, rendered.Image); err != nil {
-			writtenMu.Unlock()
-			return renderResult{inputID: id, resourceID: resourceID, err: err}
-		}
-		writtenByResourceID[resourceID] = targetPath
-		writtenMu.Unlock()
-
-		return renderResult{inputID: id, resourceID: resourceID, path: targetPath}
+		item, err := r.cachedSkyBlockItemID(id, options.Overwrite)
+		return renderResult{inputID: id, item: item, err: err}
 	}
 
 	for i := 0; i < workerCount; i++ {
@@ -311,8 +267,10 @@ func (r *Renderer) PreRenderSkyBlockItemIDs(ctx context.Context, ids []string, o
 
 		for _, index := range indexesByID[id] {
 			entry := result.Entries[index]
-			entry.ResourceID = rendered.resourceID
-			entry.Path = rendered.path
+			if rendered.item != nil {
+				entry.Path = rendered.item.Path
+				entry.TexturePackID = rendered.item.TexturePackID
+			}
 			if rendered.err != nil {
 				entry.Error = rendered.err.Error()
 			}
@@ -334,48 +292,212 @@ func (r *Renderer) PreRenderSkyBlockItemIDs(ctx context.Context, ids []string, o
 	return result, nil
 }
 
-func EncodeRendered(rendered *mbr.RenderedResource) ([]byte, string, error) {
-	if rendered == nil || rendered.Image == nil {
-		return nil, "", fmt.Errorf("rendered resource is nil")
+func (r *Renderer) renderOptions() *mbr.BlockRenderOptions {
+	return &mbr.BlockRenderOptions{
+		Size:    r.Size(),
+		PackIds: r.packIDs,
 	}
-
-	var buf bytes.Buffer
-	if err := png.Encode(&buf, rendered.Image); err != nil {
-		return nil, "", err
-	}
-
-	return buf.Bytes(), rendered.ResourceId.ResourceId, nil
 }
 
-func writeRenderedPNGAtomic(targetPath string, img image.Image) error {
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-		return err
+func (r *Renderer) requireCacheDir() (string, error) {
+	if r == nil || r.renderer == nil {
+		return "", fmt.Errorf("renderer is nil")
 	}
+	cacheDir := strings.TrimSpace(r.cacheDir)
+	if cacheDir == "" {
+		return "", fmt.Errorf("cache dir is required")
+	}
+	return cacheDir, nil
+}
 
-	tmp, err := os.CreateTemp(filepath.Dir(targetPath), ".prerender-*.png")
+func (r *Renderer) cachedSkyBlockItemID(id string, overwrite bool) (*RenderedItem, error) {
+	if r == nil || r.renderer == nil {
+		return nil, fmt.Errorf("renderer is nil")
+	}
+	options := r.renderOptions()
+	return r.cachedRenderedItem(
+		overwrite,
+		func() (*mbr.ResourceIdResult, error) {
+			return r.renderer.ComputeResourceIdFromSkyBlockItemID(id, options)
+		},
+		func() (*mbr.AnimatedRenderedResource, error) {
+			return r.renderer.RenderAnimatedSkyBlockItemID(id, options)
+		},
+	)
+}
+
+func (r *Renderer) cachedRenderedItem(overwrite bool, compute func() (*mbr.ResourceIdResult, error), render func() (*mbr.AnimatedRenderedResource, error)) (*RenderedItem, error) {
+	cacheDir, err := r.requireCacheDir()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	tmpPath := tmp.Name()
-	removeTmp := true
-	defer func() {
-		if removeTmp {
-			_ = os.Remove(tmpPath)
-		}
-	}()
+	resourceID, err := compute()
+	if err != nil {
+		return nil, err
+	}
+	if resourceID == nil || strings.TrimSpace(resourceID.ResourceId) == "" {
+		return nil, fmt.Errorf("resource id is empty")
+	}
 
-	if err := png.Encode(tmp, img); err != nil {
-		_ = tmp.Close()
-		return err
+	key := resourceID.ResourceId
+	target := &RenderedItem{
+		Path:          renderedWebPPath(cacheDir, key),
+		TexturePackID: sourcePackID(resourceID),
 	}
-	if err := tmp.Close(); err != nil {
-		return err
+
+	if !overwrite {
+		if cached := r.lookupRenderedItem(key); cached != nil {
+			return cached, nil
+		}
+		if _, statErr := os.Stat(target.Path); statErr == nil {
+			r.rememberRenderedItem(key, target)
+			return cloneRenderedItem(target), nil
+		} else if !os.IsNotExist(statErr) {
+			return nil, statErr
+		}
 	}
-	if err := os.Rename(tmpPath, targetPath); err != nil {
-		return err
+
+	inflight, owner := r.beginRender(key)
+	if !owner {
+		inflight.wg.Wait()
+		if inflight.err != nil {
+			return nil, inflight.err
+		}
+		return cloneRenderedItem(inflight.item), nil
 	}
-	removeTmp = false
-	return nil
+	defer r.finishRender(key, inflight)
+
+	if !overwrite {
+		if cached := r.lookupRenderedItem(key); cached != nil {
+			inflight.item = cached
+			return cloneRenderedItem(cached), nil
+		}
+		if _, statErr := os.Stat(target.Path); statErr == nil {
+			r.rememberRenderedItem(key, target)
+			inflight.item = target
+			return cloneRenderedItem(target), nil
+		} else if !os.IsNotExist(statErr) {
+			inflight.err = statErr
+			return nil, statErr
+		}
+	}
+
+	rendered, err := render()
+	if err != nil {
+		inflight.err = err
+		return nil, err
+	}
+	if err := writeRenderedWebP(target.Path, rendered); err != nil {
+		inflight.err = err
+		return nil, err
+	}
+
+	r.rememberRenderedItem(key, target)
+	inflight.item = target
+	return cloneRenderedItem(target), nil
+}
+
+func (r *Renderer) lookupRenderedItem(key string) *RenderedItem {
+	r.renderCacheMu.RLock()
+	cached, found := r.renderCache[key]
+	r.renderCacheMu.RUnlock()
+	if !found {
+		return nil
+	}
+	return &RenderedItem{Path: cached.Path, TexturePackID: cached.TexturePackID}
+}
+
+func (r *Renderer) rememberRenderedItem(key string, item *RenderedItem) {
+	if item == nil {
+		return
+	}
+	r.renderCacheMu.Lock()
+	if r.renderCache == nil {
+		r.renderCache = make(map[string]RenderedItem)
+	}
+	r.renderCache[key] = *item
+	r.renderCacheMu.Unlock()
+}
+
+func (r *Renderer) beginRender(key string) (*renderInflight, bool) {
+	r.inflightMu.Lock()
+	defer r.inflightMu.Unlock()
+	if r.inflight == nil {
+		r.inflight = make(map[string]*renderInflight)
+	}
+	if existing, found := r.inflight[key]; found {
+		return existing, false
+	}
+	inflight := &renderInflight{}
+	inflight.wg.Add(1)
+	r.inflight[key] = inflight
+	return inflight, true
+}
+
+func (r *Renderer) finishRender(key string, inflight *renderInflight) {
+	inflight.wg.Done()
+	r.inflightMu.Lock()
+	if r.inflight[key] == inflight {
+		delete(r.inflight, key)
+	}
+	r.inflightMu.Unlock()
+}
+
+func renderedWebPPath(cacheDir string, resourceID string) string {
+	return filepath.Join(cacheDir, "rendered", resourceID+".webp")
+}
+
+func sourcePackID(resourceID *mbr.ResourceIdResult) string {
+	if resourceID == nil || strings.TrimSpace(resourceID.SourcePackId) == "" {
+		return mbr.VanillaPackId
+	}
+	return resourceID.SourcePackId
+}
+
+func writeRenderedWebP(targetPath string, rendered *mbr.AnimatedRenderedResource) error {
+	if rendered == nil {
+		return fmt.Errorf("rendered resource is nil")
+	}
+
+	frames := rendered.Frames
+	if len(frames) == 0 {
+		if rendered.Image == nil {
+			return fmt.Errorf("rendered image is nil")
+		}
+		return imagecache.WriteWebPAtomic(targetPath, rendered.Image)
+	}
+
+	if len(frames) == 1 {
+		if frames[0].Image == nil {
+			return fmt.Errorf("rendered frame image is nil")
+		}
+		return imagecache.WriteWebPAtomic(targetPath, frames[0].Image)
+	}
+
+	images := make([]image.Image, 0, len(frames))
+	durations := make([]uint, 0, len(frames))
+	for _, frame := range frames {
+		if frame.Image == nil {
+			return fmt.Errorf("rendered frame image is nil")
+		}
+		duration := frame.DurationMs
+		if duration <= 0 {
+			duration = 50
+		}
+		images = append(images, frame.Image)
+		durations = append(durations, uint(duration))
+	}
+	return imagecache.WriteAnimatedWebPAtomic(targetPath, images, durations)
+}
+
+func cloneRenderedItem(item *RenderedItem) *RenderedItem {
+	if item == nil {
+		return nil
+	}
+	return &RenderedItem{
+		Path:          item.Path,
+		TexturePackID: item.TexturePackID,
+	}
 }
 
 func minInt(a, b int) int {

@@ -37,27 +37,56 @@ func (renderer *MinecraftBlockRenderer) RenderItemObjectWithResourceId(item any,
 	return renderer.RenderGuiItemWithResourceId(itemName, effectiveOptions), nil
 }
 
-func (renderer *MinecraftBlockRenderer) RenderSkyBlockItemID(skyBlockItemID string, options *BlockRenderOptions) (*RenderedResource, error) {
-	if strings.TrimSpace(skyBlockItemID) == "" {
-		return nil, fmt.Errorf("skyBlockItemID cannot be empty")
+func (renderer *MinecraftBlockRenderer) RenderAnimatedItemObjectWithResourceId(item any, options *BlockRenderOptions) (*AnimatedRenderedResource, error) {
+	normalized, err := data.NormalizeItemInput(item)
+	if err != nil {
+		return nil, err
 	}
 
-	itemData := &data.ItemRenderData{
-		CustomData: nbt.NewNbtCompound(map[string]nbt.NbtTag{
-			"id": nbt.NewNbtString(skyBlockItemID),
-		}),
+	itemName, itemData := renderer.prepareItemObjectRender(normalized)
+	if strings.TrimSpace(itemName) == "" {
+		return nil, fmt.Errorf("unable to resolve item id from input type %T", item)
 	}
 
 	effectiveOptions := mergeItemObjectOptions(options, itemData)
-	target := "minecraft:player_head"
-	if len(effectiveOptions.PackIds) > 0 {
-		target = "firmskyblock:item/" + renderer.EncodeFirmamentId(skyBlockItemID)
+	return renderer.RenderAnimatedGuiItemWithResourceId(itemName, effectiveOptions)
+}
+
+func (renderer *MinecraftBlockRenderer) RenderSkyBlockItemID(skyBlockItemID string, options *BlockRenderOptions) (*RenderedResource, error) {
+	target, effectiveOptions, err := renderer.prepareSkyBlockItemIDRender(skyBlockItemID, options)
+	if err != nil {
+		return nil, err
 	}
 	return renderer.RenderGuiItemWithResourceId(target, effectiveOptions), nil
 }
 
 func (renderer *MinecraftBlockRenderer) RenderItemNBT(item any, options *BlockRenderOptions) (*RenderedResource, error) {
 	return renderer.RenderItemObjectWithResourceId(normalizeNbtRenderInput(item), options)
+}
+
+func (renderer *MinecraftBlockRenderer) RenderAnimatedSkyBlockItemID(skyBlockItemID string, options *BlockRenderOptions) (*AnimatedRenderedResource, error) {
+	target, effectiveOptions, err := renderer.prepareSkyBlockItemIDRender(skyBlockItemID, options)
+	if err != nil {
+		return nil, err
+	}
+	return renderer.RenderAnimatedGuiItemWithResourceId(target, effectiveOptions)
+}
+
+func (renderer *MinecraftBlockRenderer) RenderAnimatedItemNBT(item any, options *BlockRenderOptions) (*AnimatedRenderedResource, error) {
+	return renderer.RenderAnimatedItemObjectWithResourceId(normalizeNbtRenderInput(item), options)
+}
+
+func (renderer *MinecraftBlockRenderer) ComputeResourceIdFromSkyBlockItemID(skyBlockItemID string, options *BlockRenderOptions) (*ResourceIdResult, error) {
+	target, effectiveOptions, err := renderer.prepareSkyBlockItemIDRender(skyBlockItemID, options)
+	if err != nil {
+		return nil, err
+	}
+	rendererForOptions, forwardedOptions := renderer.ResolveRendererForOptions(*effectiveOptions)
+	return rendererForOptions.ComputeResourceIdInternal(target, forwardedOptions, nil), nil
+}
+
+func (renderer *MinecraftBlockRenderer) ComputeResourceIdFromNBT(item any, options *BlockRenderOptions) (*ResourceIdResult, error) {
+	return renderer.ComputeResourceIdFromItemObject(normalizeNbtRenderInput(item), options)
 }
 
 func (renderer *MinecraftBlockRenderer) ComputeResourceIdFromItemObject(item any, options *BlockRenderOptions) (*ResourceIdResult, error) {
@@ -74,6 +103,25 @@ func (renderer *MinecraftBlockRenderer) ComputeResourceIdFromItemObject(item any
 	effectiveOptions := mergeItemObjectOptions(options, itemData)
 	rendererForOptions, forwardedOptions := renderer.ResolveRendererForOptions(*effectiveOptions)
 	return rendererForOptions.ComputeResourceIdInternal(itemName, forwardedOptions, nil), nil
+}
+
+func (renderer *MinecraftBlockRenderer) prepareSkyBlockItemIDRender(skyBlockItemID string, options *BlockRenderOptions) (string, *BlockRenderOptions, error) {
+	if strings.TrimSpace(skyBlockItemID) == "" {
+		return "", nil, fmt.Errorf("skyBlockItemID cannot be empty")
+	}
+
+	itemData := &data.ItemRenderData{
+		CustomData: nbt.NewNbtCompound(map[string]nbt.NbtTag{
+			"id": nbt.NewNbtString(skyBlockItemID),
+		}),
+	}
+
+	effectiveOptions := mergeItemObjectOptions(options, itemData)
+	target := "minecraft:player_head"
+	if len(effectiveOptions.PackIds) > 0 {
+		target = "firmskyblock:item/" + renderer.EncodeFirmamentId(skyBlockItemID)
+	}
+	return target, effectiveOptions, nil
 }
 
 func (renderer *MinecraftBlockRenderer) prepareItemObjectRender(normalized *data.NormalizedItemInput) (string, *data.ItemRenderData) {

@@ -82,6 +82,7 @@ type MinecraftBlockRenderer struct {
 	_itemRegistry              *data.ItemRegistry
 	_packContext               RenderPackContext
 	_assetsDirectory           string
+	_cacheDirectory            string
 	_playerSkinCacheDirectory  string
 	_baseOverlayRoots          []OverlayRoot
 	_packRegistry              *texturepacks.TexturePackRegistry
@@ -195,18 +196,17 @@ func CreateFromMinecraftAssets(
 
 func NewMinecraftBlockRenderer(BlockModelResolver *data.BlockModelResolver, TextureRepository *data.TextureRepository, BlockRegistry *data.BlockRegistry, ItemRegistry *data.ItemRegistry, AssetsDirectory string, BaseOverlayRoots []OverlayRoot, PackRegistry *texturepacks.TexturePackRegistry, PackContext RenderPackContext) *MinecraftBlockRenderer {
 	return &MinecraftBlockRenderer{
-		_modelResolver:            BlockModelResolver,
-		_textureRepository:        TextureRepository,
-		_blockRegistry:            BlockRegistry,
-		_itemRegistry:             ItemRegistry,
-		_assetsDirectory:          AssetsDirectory,
-		_playerSkinCacheDirectory: InitializePlayerSkinCacheDirectory(AssetsDirectory),
-		_baseOverlayRoots:         BaseOverlayRoots,
-		_packRegistry:             PackRegistry,
-		_packContext:              PackContext,
-		_packRendererCache:        make(map[string]*MinecraftBlockRenderer),
-		_biomeTintedTextureCache:  make(map[string]image.RGBA),
-		_playerSkinCache:          make(map[string]*image.RGBA),
+		_modelResolver:           BlockModelResolver,
+		_textureRepository:       TextureRepository,
+		_blockRegistry:           BlockRegistry,
+		_itemRegistry:            ItemRegistry,
+		_assetsDirectory:         AssetsDirectory,
+		_baseOverlayRoots:        BaseOverlayRoots,
+		_packRegistry:            PackRegistry,
+		_packContext:             PackContext,
+		_packRendererCache:       make(map[string]*MinecraftBlockRenderer),
+		_biomeTintedTextureCache: make(map[string]image.RGBA),
+		_playerSkinCache:         make(map[string]*image.RGBA),
 	}
 }
 
@@ -276,14 +276,35 @@ func getParentDirectory(path string) *string {
 	return &parent
 }
 
-func InitializePlayerSkinCacheDirectory(assetsDirectory string) string {
-	candidate := filepath.Join("cache", "player_skins")
-	err := os.MkdirAll(candidate, os.ModePerm)
-	if err != nil {
-		panic("Unable to initialize player skin cache directory: " + err.Error())
+func (renderer *MinecraftBlockRenderer) SetCacheDirectory(cacheDir string) {
+	if renderer == nil {
+		return
 	}
 
-	return candidate
+	cacheDir = strings.TrimSpace(cacheDir)
+	renderer._cacheDirectory = cacheDir
+	if cacheDir == "" {
+		renderer._playerSkinCacheDirectory = ""
+		if renderer._textureRepository != nil {
+			renderer._textureRepository.SetDiskCacheDirectory("", "")
+		}
+		return
+	}
+
+	renderer._playerSkinCacheDirectory = filepath.Join(cacheDir, "player_skins")
+	if renderer._textureRepository != nil {
+		namespace := renderer._packContext.PackStackHash
+		if strings.TrimSpace(namespace) == "" {
+			namespace = VanillaPackId
+		}
+		renderer._textureRepository.SetDiskCacheDirectory(filepath.Join(cacheDir, "derived"), namespace)
+	}
+
+	renderer._packRendererCacheMu.Lock()
+	for _, cached := range renderer._packRendererCache {
+		cached.SetCacheDirectory(cacheDir)
+	}
+	renderer._packRendererCacheMu.Unlock()
 }
 
 func (renderer *MinecraftBlockRenderer) NormalizeResourceKey(identifier *string) string {
