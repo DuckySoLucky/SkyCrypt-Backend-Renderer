@@ -1,9 +1,9 @@
 package minecraftblockrenderer
 
 import (
-	nbt "duckysolucky/gorenderer/src/NBT"
-	"duckysolucky/gorenderer/src/data"
 	"fmt"
+	nbt "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/NBT"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
 	"image"
 	"strings"
 )

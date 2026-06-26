@@ -1,7 +1,7 @@
 package texturepacks
 
 import (
-	"duckysolucky/gorenderer/src/assets"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/assets"
 	"time"
 )
 

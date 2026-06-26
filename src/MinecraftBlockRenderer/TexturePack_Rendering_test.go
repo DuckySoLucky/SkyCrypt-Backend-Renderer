@@ -1,7 +1,7 @@
 package minecraftblockrenderer
 
 import (
-	texturepacks "duckysolucky/gorenderer/src/TexturePacks"
+	texturepacks "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/TexturePacks"
 	"image/color"
 	"os"
 	"path/filepath"

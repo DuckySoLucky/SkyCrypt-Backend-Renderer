@@ -1,9 +1,9 @@
 package minecraftblockrenderer
 
 import (
-	nbt "duckysolucky/gorenderer/src/NBT"
-	texturepacks "duckysolucky/gorenderer/src/TexturePacks"
-	"duckysolucky/gorenderer/src/data"
+	nbt "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/NBT"
+	texturepacks "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/TexturePacks"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
 	"strings"
 	"testing"
 )

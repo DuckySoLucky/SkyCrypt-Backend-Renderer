@@ -1,11 +1,11 @@
 package minecraftblockrenderer
 
 import (
-	texturepacks "duckysolucky/gorenderer/src/TexturePacks"
-	"duckysolucky/gorenderer/src/assets"
-	"duckysolucky/gorenderer/src/data"
 	"encoding/base64"
 	"fmt"
+	texturepacks "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/TexturePacks"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/assets"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
 	"image"
 	"image/draw"
 	"io"

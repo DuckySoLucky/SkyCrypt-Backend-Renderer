@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	nbt "duckysolucky/gorenderer/src/NBT"
+	nbt "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/NBT"
 )
 
 const maxItemModelSelectorRecursionDepth = 10000

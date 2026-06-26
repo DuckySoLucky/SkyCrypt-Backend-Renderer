@@ -1,4 +1,4 @@
-module duckysolucky/gorenderer
+module github.com/DuckySoLucky/SkyCrypt-Backend-Renderer
 
 go 1.26.1
 

@@ -1,110 +1,153 @@
-package main
+package renderer
 
 import (
 	"bytes"
-	mbr "duckysolucky/gorenderer/src/MinecraftBlockRenderer"
-	texturepacks "duckysolucky/gorenderer/src/TexturePacks"
-	"time"
-
 	"fmt"
 	"image/png"
-	"os"
-	"path/filepath"
+
+	mbr "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/MinecraftBlockRenderer"
+	texturepacks "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/TexturePacks"
 )
 
+const (
+	DefaultSize = 128
+)
+
+var DefaultPackIDs = []string{"fsr", "hplus"}
+
+type Options struct {
+	Size    int
+	PackIDs []string
+	Preload bool
+}
+
+type RenderedPNG struct {
+	PNG        []byte
+	ResourceID string
+}
+
 type Renderer struct {
-	r       *mbr.MinecraftBlockRenderer
-	packIDs []string
-	size    int
+	renderer *mbr.MinecraftBlockRenderer
+	packIDs  []string
+	size     int
 }
 
 func NewRenderer(assetsRoot, texturePacksRoot string) (*Renderer, error) {
+	return NewRendererWithOptions(assetsRoot, texturePacksRoot, Options{
+		Size:    DefaultSize,
+		PackIDs: DefaultPackIDs,
+		Preload: true,
+	})
+}
+
+func NewRendererWithOptions(assetsRoot, texturePacksRoot string, options Options) (*Renderer, error) {
+	size := options.Size
+	if size <= 0 {
+		size = DefaultSize
+	}
+
+	packIDs := append([]string(nil), options.PackIDs...)
+	if len(packIDs) == 0 {
+		packIDs = append([]string(nil), DefaultPackIDs...)
+	}
+
 	registry := texturepacks.NewTexturePackRegistry()
 	registry.RegisterAllPacks(texturePacksRoot, false)
 
-	packIDs := []string{"fsr", "hplus"}
-
-	renderer := mbr.CreateFromMinecraftAssets(assetsRoot, registry, packIDs)
-	renderer.PreloadRegisteredPacks(true)
+	blockRenderer := mbr.CreateFromMinecraftAssets(assetsRoot, registry, packIDs)
+	if options.Preload {
+		blockRenderer.PreloadRegisteredPacks(true)
+	}
 
 	return &Renderer{
-		r:       renderer,
-		packIDs: packIDs,
-		size:    128,
+		renderer: blockRenderer,
+		packIDs:  packIDs,
+		size:     size,
 	}, nil
 }
 
-func (s *Renderer) TextureFromSkyBlockItemID(id string) ([]byte, string, error) {
-	rendered, err := s.r.RenderSkyBlockItemID(id, &mbr.BlockRenderOptions{
-		Size:    s.size,
-		PackIds: s.packIDs,
+func (r *Renderer) Size() int {
+	if r == nil || r.size <= 0 {
+		return DefaultSize
+	}
+	return r.size
+}
+
+func (r *Renderer) PackIDs() []string {
+	if r == nil {
+		return nil
+	}
+	return append([]string(nil), r.packIDs...)
+}
+
+func (r *Renderer) MinecraftRenderer() *mbr.MinecraftBlockRenderer {
+	if r == nil {
+		return nil
+	}
+	return r.renderer
+}
+
+func (r *Renderer) RenderSkyBlockItemID(id string) (*mbr.RenderedResource, error) {
+	if r == nil || r.renderer == nil {
+		return nil, fmt.Errorf("renderer is nil")
+	}
+	return r.renderer.RenderSkyBlockItemID(id, &mbr.BlockRenderOptions{
+		Size:    r.Size(),
+		PackIds: r.packIDs,
 	})
+}
+
+func (r *Renderer) RenderItemNBT(item any) (*mbr.RenderedResource, error) {
+	if r == nil || r.renderer == nil {
+		return nil, fmt.Errorf("renderer is nil")
+	}
+	return r.renderer.RenderItemNBT(item, &mbr.BlockRenderOptions{
+		Size:    r.Size(),
+		PackIds: r.packIDs,
+	})
+}
+
+func (r *Renderer) TextureFromSkyBlockItemID(id string) ([]byte, string, error) {
+	rendered, err := r.RenderSkyBlockItemID(id)
 	if err != nil {
 		return nil, "", err
 	}
-
-	return encodeRendered(rendered)
+	return EncodeRendered(rendered)
 }
 
-func (s *Renderer) TextureFromNBT(item any) ([]byte, string, error) {
-	rendered, err := s.r.RenderItemNBT(item, &mbr.BlockRenderOptions{
-		Size:    s.size,
-		PackIds: s.packIDs,
-	})
+func (r *Renderer) TextureFromNBT(item any) ([]byte, string, error) {
+	rendered, err := r.RenderItemNBT(item)
 	if err != nil {
 		return nil, "", err
 	}
-
-	return encodeRendered(rendered)
+	return EncodeRendered(rendered)
 }
 
-func encodeRendered(rendered *mbr.RenderedResource) ([]byte, string, error) {
+func (r *Renderer) PNGFromSkyBlockItemID(id string) (*RenderedPNG, error) {
+	pngBytes, resourceID, err := r.TextureFromSkyBlockItemID(id)
+	if err != nil {
+		return nil, err
+	}
+	return &RenderedPNG{PNG: pngBytes, ResourceID: resourceID}, nil
+}
+
+func (r *Renderer) PNGFromNBT(item any) (*RenderedPNG, error) {
+	pngBytes, resourceID, err := r.TextureFromNBT(item)
+	if err != nil {
+		return nil, err
+	}
+	return &RenderedPNG{PNG: pngBytes, ResourceID: resourceID}, nil
+}
+
+func EncodeRendered(rendered *mbr.RenderedResource) ([]byte, string, error) {
+	if rendered == nil || rendered.Image == nil {
+		return nil, "", fmt.Errorf("rendered resource is nil")
+	}
+
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, rendered.Image); err != nil {
 		return nil, "", err
 	}
 
 	return buf.Bytes(), rendered.ResourceId.ResourceId, nil
-}
-
-func main() {
-	cwd, _ := os.Getwd()
-	assetsPath := filepath.Join(cwd, "packs", "assets", "minecraft")
-	texturePacksPath := filepath.Join(cwd, "texturepacks")
-
-	renderer, err := NewRenderer(assetsPath, texturePacksPath)
-	if err != nil {
-		fmt.Printf("Error creating renderer: %v\n", err)
-		return
-	}
-
-	packs := renderer.r.GetLoadedResourcePacks()
-	for _, pack := range packs {
-		fmt.Printf("Loaded resource pack: %s - (%+v)\n", pack.Pack.DisplayName, pack.Meta.Version)
-	}
-
-	timeNow := time.Now()
-
-	pngBytes, cacheKey, err := renderer.TextureFromNBT(map[string]any{
-		"id":    "minecraft:iron_sword",
-		"Count": 1,
-		"tag": map[string]any{
-			"ExtraAttributes": map[string]any{
-				// "id": "HYPERION",
-				"id": "STRONG_DRAGON_HELMET",
-			},
-		},
-	})
-	if err != nil {
-		fmt.Printf("Error rendering item: %v\n", err)
-		return
-	}
-
-	if err := os.WriteFile("midas_sword.png", pngBytes, 0644); err != nil {
-		fmt.Printf("Error writing output file: %v\n", err)
-		return
-	}
-
-	fmt.Printf("Rendered MIDAS_SWORD as midas_sword.png with cache key %s in %v\n", cacheKey, time.Since(timeNow))
-
 }

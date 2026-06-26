@@ -1,9 +1,9 @@
 package data
 
 import (
-	nbt "duckysolucky/gorenderer/src/NBT"
 	"errors"
 	"fmt"
+	nbt "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/NBT"
 	"image/color"
 	"math"
 	"reflect"

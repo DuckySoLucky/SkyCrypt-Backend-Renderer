@@ -1,7 +1,7 @@
 package model
 
 import (
-	"duckysolucky/gorenderer/src/data"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
 	"math"
 	"testing"
 )

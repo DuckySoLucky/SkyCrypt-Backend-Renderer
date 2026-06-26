@@ -2,14 +2,14 @@ package minecraftblockrenderer
 
 import (
 	"crypto/sha256"
-	"duckysolucky/gorenderer/src"
-	nbt "duckysolucky/gorenderer/src/NBT"
-	"duckysolucky/gorenderer/src/data"
-	"duckysolucky/gorenderer/src/global"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src"
+	nbt "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/NBT"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/global"
 	"image"
 	"image/color"
 	"image/png"
@@ -135,6 +135,9 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderGuiItemInternal(ite
 
 	if options.OverrideGuiTransform == nil && options.UseGuiTransform && model != nil {
 		if guiOverride, exists := model.Display["gui"]; exists {
+			if _minecraftBlockRenderer.ShouldUseSkyBlockTemplateSkullItemOrientation(model, *options) {
+				guiOverride = cloneTransformWithYawOffset(guiOverride, -90)
+			}
 			options.OverrideGuiTransform = guiOverride
 		}
 	}

@@ -3,10 +3,10 @@ package assets
 import (
 	"archive/zip"
 	"crypto/sha1"
-	"duckysolucky/gorenderer/src/global"
-	"duckysolucky/gorenderer/src/models"
 	"encoding/hex"
 	"fmt"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/global"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/models"
 	"io"
 	"os"
 	"path/filepath"

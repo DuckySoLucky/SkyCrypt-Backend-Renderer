@@ -2,13 +2,13 @@ package minecraftblockrenderer
 
 import (
 	"crypto/sha256"
-	nbt "duckysolucky/gorenderer/src/NBT"
-	texturepacks "duckysolucky/gorenderer/src/TexturePacks"
-	"duckysolucky/gorenderer/src/assets"
-	"duckysolucky/gorenderer/src/data"
 	"encoding/base32"
 	"encoding/hex"
 	"fmt"
+	nbt "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/NBT"
+	texturepacks "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/TexturePacks"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/assets"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
 	"image"
 	"image/color"
 	"image/draw"

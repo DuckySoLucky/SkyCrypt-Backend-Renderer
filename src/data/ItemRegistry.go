@@ -1,8 +1,8 @@
 package data
 
 import (
-	"duckysolucky/gorenderer/src/assets"
-	"duckysolucky/gorenderer/src/global"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/assets"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/global"
 	"image/color"
 	"os"
 	"strings"

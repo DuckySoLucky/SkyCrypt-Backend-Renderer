@@ -1,6 +1,6 @@
 package minecraftblockrenderer
 
-import "duckysolucky/gorenderer/src/data"
+import "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
 
 func ResolveTexture(texture string, model *data.BlockModelInstance) string {
 	if texture == "" {

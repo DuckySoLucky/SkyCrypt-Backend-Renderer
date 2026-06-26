@@ -1,9 +1,9 @@
 package minecraftblockrenderer
 
 import (
-	"duckysolucky/gorenderer/src"
-	"duckysolucky/gorenderer/src/data"
-	"duckysolucky/gorenderer/src/model"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/model"
 	"image"
 	"image/color"
 	"math"

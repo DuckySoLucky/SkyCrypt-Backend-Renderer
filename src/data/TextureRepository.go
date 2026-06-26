@@ -2,9 +2,9 @@ package data
 
 import (
 	"bytes"
-	"duckysolucky/gorenderer/src/assets"
-	"duckysolucky/gorenderer/src/global"
 	"fmt"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/assets"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/global"
 	"image"
 	"image/color"
 	"io"

@@ -1,11 +1,11 @@
 package minecraftblockrenderer
 
 import (
-	"duckysolucky/gorenderer/src"
-	geometry "duckysolucky/gorenderer/src/Geometry"
-	"duckysolucky/gorenderer/src/data"
-	"duckysolucky/gorenderer/src/model"
 	"fmt"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src"
+	geometry "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/Geometry"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/model"
 	"image"
 )
 

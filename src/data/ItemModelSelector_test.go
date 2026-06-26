@@ -1,7 +1,7 @@
 package data
 
 import (
-	nbt "duckysolucky/gorenderer/src/NBT"
+	nbt "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/NBT"
 	"testing"
 )
 
