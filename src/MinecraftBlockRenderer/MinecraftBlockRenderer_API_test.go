@@ -103,6 +103,33 @@ func TestCreateFromResourceProviderAndAnimatedRender(t *testing.T) {
 	}
 }
 
+func TestPartialBlockRenderOptionsKeepDefaults(t *testing.T) {
+	assetsRoot := createMinimalAssets(t)
+	renderer, err := CreateFromDataDirectory(assetsRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defaultSize := DefaultBlockRenderOptions().Size
+	rendered := renderer.RenderGuiItemWithResourceId("diamond_sword", &BlockRenderOptions{})
+	if rendered == nil {
+		t.Fatal("rendered resource is nil")
+	}
+	assertImage(t, rendered.Image, defaultSize, 1)
+
+	textureItem, err := renderer.RenderGuiItemFromTextureId("minecraft:item/diamond_sword", &BlockRenderOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertImage(t, textureItem, defaultSize, 1)
+
+	animated, err := renderer.RenderAnimatedGuiItemWithResourceId("clock", &BlockRenderOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertImage(t, animated.Image, defaultSize, 1)
+}
+
 func TestRenderFlatItemCompositesTransparentModelLayers(t *testing.T) {
 	assetsRoot := createMinimalAssets(t)
 	writeJSON(t, assetsRoot, "items/layered_item.json", `{"model":{"model":"minecraft:item/layered_item"}}`)

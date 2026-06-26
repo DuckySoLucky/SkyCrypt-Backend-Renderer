@@ -143,6 +143,36 @@ func TestRenderItemNBTCompoundWritesSkyBlockPackCache(t *testing.T) {
 	assertCachedWebPHasNonBlackOpaqueColor(t, item.Path)
 }
 
+func TestRenderItemNBTSkyBlockPackIgnoresVanillaDisplayTint(t *testing.T) {
+	renderer := newTestRenderer(t)
+
+	expectedResource, err := renderer.MinecraftRenderer().ComputeResourceIdFromSkyBlockItemID("TEST_ITEM", renderer.renderOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	item, err := renderer.RenderItemNBT(map[string]any{
+		"id": "minecraft:player_head",
+		"tag": map[string]any{
+			"display": map[string]any{
+				"color": 0,
+			},
+			"ExtraAttributes": map[string]any{
+				"id": "TEST_ITEM",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.Path != renderedWebPPath(renderer.cacheDir, expectedResource.ResourceId) {
+		t.Fatalf("RenderItemNBT path = %q, want SkyBlock ID path", item.Path)
+	}
+	assertRenderedItem(t, renderer, item, sourcePackID(expectedResource))
+	assertCachedWebPHasNonBlackOpaqueColor(t, item.Path)
+	assertPNGHasNonBlackOpaqueColor(t, renderedPNGPathFromWebP(item.Path))
+}
+
 func TestRenderItemNBTWebPKeepsVanillaTextureColors(t *testing.T) {
 	renderer := newTestRenderer(t)
 

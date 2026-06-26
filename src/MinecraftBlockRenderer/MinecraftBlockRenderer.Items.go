@@ -2483,13 +2483,9 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) EnumerateTextureNameVaria
 }
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderGuiItemWithResourceId(itemName string, options *BlockRenderOptions) *RenderedResource {
-	effectiveOptions := options
-	if effectiveOptions == nil {
-		opt := DefaultBlockRenderOptions()
-		effectiveOptions = &opt
-	}
+	effectiveOptions := MergeBlockRenderOptions(options)
 
-	rendered, forwardedOptions := _minecraftBlockRenderer.ResolveRendererForOptions(*effectiveOptions)
+	rendered, forwardedOptions := _minecraftBlockRenderer.ResolveRendererForOptions(effectiveOptions)
 	capture := ItemRenderCapture{}
 
 	// fmt.Printf("Rendering GUI item: %s with options: %+v %+v\n", itemName, forwardedOptions, capture)

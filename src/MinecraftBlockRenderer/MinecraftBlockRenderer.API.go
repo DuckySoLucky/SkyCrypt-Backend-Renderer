@@ -157,13 +157,7 @@ func (renderer *MinecraftBlockRenderer) RenderGuiItemFromTextureId(textureId str
 	if strings.TrimSpace(textureId) == "" {
 		return nil, fmt.Errorf("textureId cannot be empty")
 	}
-	effective := DefaultBlockRenderOptions()
-	if options != nil {
-		effective = *options
-	}
-	if effective.Size <= 0 {
-		effective.Size = DefaultBlockRenderOptions().Size
-	}
+	effective := MergeBlockRenderOptions(options)
 	if fallbackItem, ok := resolveTextureIDFallbackItem(textureId); ok {
 		rendered := renderer.RenderGuiItemWithResourceId(fallbackItem, &effective)
 		if rendered == nil || rendered.Image == nil {
@@ -257,10 +251,7 @@ func (renderer *MinecraftBlockRenderer) RenderAnimatedGuiItemWithResourceId(item
 	if renderer == nil {
 		return nil, fmt.Errorf("renderer is nil")
 	}
-	effective := DefaultBlockRenderOptions()
-	if options != nil {
-		effective = *options
-	}
+	effective := MergeBlockRenderOptions(options)
 	rendererForOptions, forwarded := renderer.ResolveRendererForOptions(effective)
 	base := rendererForOptions.RenderGuiItemWithResourceId(itemName, &forwarded)
 	if base == nil {

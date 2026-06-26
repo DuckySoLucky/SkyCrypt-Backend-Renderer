@@ -153,13 +153,15 @@ func (renderer *MinecraftBlockRenderer) normalizePackedSkyblockItemObjectOptions
 	if normalized == nil || options == nil || len(options.PackIds) == 0 {
 		return options
 	}
-	if strings.TrimSpace(normalized.SkyblockID) == "" || options.ItemData == nil || options.ItemData.Profile == nil {
+	if strings.TrimSpace(normalized.SkyblockID) == "" || options.ItemData == nil {
 		return options
 	}
 
 	effectiveOptions := *options
 	itemData := *options.ItemData
 	itemData.Profile = nil
+	itemData.Layer0Tint = nil
+	itemData.AdditionalLayerTints = nil
 	effectiveOptions.ItemData = &itemData
 	return &effectiveOptions
 }
@@ -221,45 +223,7 @@ func buildItemObjectRenderData(normalized *data.NormalizedItemInput) *data.ItemR
 }
 
 func mergeItemObjectOptions(options *BlockRenderOptions, itemData *data.ItemRenderData) *BlockRenderOptions {
-	effective := DefaultBlockRenderOptions()
-	if options != nil {
-		if options.Size != 0 {
-			effective.Size = options.Size
-		}
-		if options.YawInDegrees != 0 {
-			effective.YawInDegrees = options.YawInDegrees
-		}
-		if options.PitchInDegrees != 0 {
-			effective.PitchInDegrees = options.PitchInDegrees
-		}
-		if options.RollInDegrees != 0 {
-			effective.RollInDegrees = options.RollInDegrees
-		}
-		if options.PerspectiveAmount != 0 {
-			effective.PerspectiveAmount = options.PerspectiveAmount
-		}
-		if options.Padding != 0 {
-			effective.Padding = options.Padding
-		}
-		if options.AdditionalScale != 0 {
-			effective.AdditionalScale = options.AdditionalScale
-		}
-		if options.AdditionalTranslation != (data.Vector3{}) {
-			effective.AdditionalTranslation = options.AdditionalTranslation
-		}
-		if options.OverrideGuiTransform != nil {
-			effective.OverrideGuiTransform = options.OverrideGuiTransform
-		}
-		if len(options.PackIds) > 0 {
-			effective.PackIds = options.PackIds
-		}
-		if options.SkullTextureResolver != nil {
-			effective.SkullTextureResolver = options.SkullTextureResolver
-		}
-		if options.EnableAntiAliasing {
-			effective.EnableAntiAliasing = true
-		}
-	}
+	effective := MergeBlockRenderOptions(options)
 	if itemData != nil {
 		effective.ItemData = itemData
 	}
