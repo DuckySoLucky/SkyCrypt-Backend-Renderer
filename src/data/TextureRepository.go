@@ -910,14 +910,17 @@ func TryBuildTextureAnimation(spriteSheet image.RGBA, openMcmeta *func() (io.Rea
 	} else if frameHeight > spriteSheet.Bounds().Dy() {
 		frameHeight = spriteSheet.Bounds().Dy()
 	}
+	if frameWidth <= 0 || frameHeight <= 0 {
+		return nil
+	}
 
 	framesPerRow := max(1, spriteSheet.Bounds().Dx()/frameWidth)
 	framesPerColumn := max(1, spriteSheet.Bounds().Dy()/frameHeight)
 	maximumFrameIndex := max(framesPerRow*framesPerColumn-1, 0)
+	descriptors := buildAnimationFrameDescriptors(metaData.Animation.Frames, metaData.Animation.FrameTime, maximumFrameIndex+1)
 
 	var frames []TextureAnimationFrame
-	for _, rawDescriptor := range metaData.Animation.Frames {
-		descriptor := parseAnimationFrameDescriptor(rawDescriptor, metaData.Animation.FrameTime)
+	for _, descriptor := range descriptors {
 		if descriptor.Index < 0 {
 			continue
 		}
@@ -963,6 +966,28 @@ func TryBuildTextureAnimation(spriteSheet image.RGBA, openMcmeta *func() (io.Rea
 type animationFrameDescriptor struct {
 	Index     int
 	FrameTime float64
+}
+
+func buildAnimationFrameDescriptors(rawDescriptors []interface{}, defaultFrameTime float64, frameCount int) []animationFrameDescriptor {
+	if len(rawDescriptors) > 0 {
+		descriptors := make([]animationFrameDescriptor, 0, len(rawDescriptors))
+		for _, rawDescriptor := range rawDescriptors {
+			descriptors = append(descriptors, parseAnimationFrameDescriptor(rawDescriptor, defaultFrameTime))
+		}
+		return descriptors
+	}
+
+	if frameCount <= 0 {
+		return nil
+	}
+	descriptors := make([]animationFrameDescriptor, 0, frameCount)
+	for index := 0; index < frameCount; index++ {
+		descriptors = append(descriptors, animationFrameDescriptor{
+			Index:     index,
+			FrameTime: defaultFrameTime,
+		})
+	}
+	return descriptors
 }
 
 func parseAnimationFrameDescriptor(raw interface{}, defaultFrameTime float64) animationFrameDescriptor {

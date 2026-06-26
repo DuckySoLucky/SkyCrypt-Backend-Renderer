@@ -98,6 +98,10 @@ func NewRendererWithOptions(options Options) (*Renderer, error) {
 	registry := texturepacks.NewTexturePackRegistry()
 	registry.RegisterAllPacks(options.ResourcePacksRoot, false)
 
+	if err := imagecache.EnsureCacheVersion(cacheDir, imagecache.CacheFormatVersion, "rendered", "player_skins", "derived"); err != nil {
+		return nil, err
+	}
+
 	blockRenderer := mbr.CreateFromMinecraftAssets(options.AssetsRoot, registry, packIDs)
 	blockRenderer.SetCacheDirectory(cacheDir)
 	if options.Preload {

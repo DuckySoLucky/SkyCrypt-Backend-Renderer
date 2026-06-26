@@ -43,6 +43,49 @@ func TestAnimatedTextureUsesFirstFrameDimensions(t *testing.T) {
 	assertTextureRepoWebPFile(t, matches[0])
 }
 
+func TestAnimatedTextureInfersFramesWhenMcmetaFramesOmitted(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "assets", "minecraft")
+	texturePath := filepath.Join(root, "textures", "item", "survivor_cube.png")
+	writeTextureRepoAnimatedPNG(t, texturePath)
+	writeTextureRepoText(t, texturePath+".mcmeta", `{"animation":{"frametime":1,"width":16,"height":16}}`)
+	cacheDir := t.TempDir()
+
+	provider, err := assets.NewDirectoryResourceProvider(filepath.Join(root, "textures"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := assets.NewAssetNamespaceRegistry()
+	registry.AddNamespaceWithProvider("minecraft", filepath.Join(root, "textures"), "test", true, provider)
+	repository := NewTextureRepository(filepath.Join(root, "textures"), nil, nil, *registry)
+	repository.SetDiskCacheDirectory(cacheDir, "test")
+
+	texture := repository.GetTexture("minecraft:item/survivor_cube")
+	if texture.Bounds().Dx() != 16 || texture.Bounds().Dy() != 16 {
+		t.Fatalf("animated first frame size = %dx%d, want 16x16", texture.Bounds().Dx(), texture.Bounds().Dy())
+	}
+
+	animation, ok := repository.GetAnimation("minecraft:item/survivor_cube")
+	if !ok || len(animation.Frames) != 2 {
+		t.Fatalf("animation frames = %#v, ok=%v; want 2 inferred frames", animation, ok)
+	}
+	first := color.RGBAModel.Convert(animation.Frames[0].Image.At(0, 0)).(color.RGBA)
+	second := color.RGBAModel.Convert(animation.Frames[1].Image.At(0, 0)).(color.RGBA)
+	if first != (color.RGBA{R: 255, A: 255}) || second != (color.RGBA{G: 255, A: 255}) {
+		t.Fatalf("unexpected inferred frame colors: first=%#v second=%#v", first, second)
+	}
+
+	matches, err := filepath.Glob(filepath.Join(cacheDir, "animations", "*", "frame-*.webp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 2 {
+		t.Fatalf("cached animation frames = %d, want 2", len(matches))
+	}
+	for _, match := range matches {
+		assertTextureRepoWebPFile(t, match)
+	}
+}
+
 func TestTintedTextureWritesDerivedWebP(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "assets", "minecraft")
 	textureRoot := filepath.Join(root, "textures")

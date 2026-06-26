@@ -2,6 +2,7 @@ package renderer
 
 import (
 	"context"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -13,6 +14,7 @@ import (
 
 	mbr "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/MinecraftBlockRenderer"
 	texturepacks "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/TexturePacks"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/imagecache"
 )
 
 func TestNewRendererRequiresPackIDs(t *testing.T) {
@@ -34,6 +36,32 @@ func TestNewRendererRequiresCacheDir(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "cache dir is required") {
 		t.Fatalf("expected cache dir error, got %v", err)
+	}
+}
+
+func TestNewRendererPurgesOldCacheVersion(t *testing.T) {
+	assetsRoot := createRootMinimalAssets(t)
+	packRoot := createRootSkyblockPack(t, "testpack")
+	cacheDir := t.TempDir()
+	stalePath := filepath.Join(cacheDir, "rendered", "stale.webp")
+	if err := os.MkdirAll(filepath.Dir(stalePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stalePath, []byte("old-bad-cache"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := NewRenderer(Options{
+		AssetsRoot:        assetsRoot,
+		ResourcePacksRoot: filepath.Dir(packRoot),
+		PackIDs:           []string{"testpack"},
+		CacheDir:          cacheDir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
+		t.Fatalf("old cache file was not purged, err=%v", err)
 	}
 }
 
@@ -74,6 +102,19 @@ func TestRenderItemNBTWritesWebPCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertRenderedItem(t, renderer, item, mbr.VanillaPackId)
+}
+
+func TestRenderItemNBTWebPKeepsVanillaTextureColors(t *testing.T) {
+	renderer := newTestRenderer(t)
+
+	item, err := renderer.RenderItemNBT(map[string]any{
+		"id": "minecraft:diamond_sword",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertRenderedItem(t, renderer, item, mbr.VanillaPackId)
+	assertCachedWebPHasColor(t, item.Path, color.NRGBA{R: 40, G: 180, B: 220, A: 255})
 }
 
 func TestRenderSkyBlockItemIDReusesExistingWebPCache(t *testing.T) {
@@ -360,13 +401,16 @@ func createRootMinimalAssets(t testing.TB) string {
 		}}]
 	}`)
 	writeRootJSON(t, root, "items/player_head.json", `{"model":{"model":"minecraft:item/player_head"}}`)
+	writeRootJSON(t, root, "items/diamond_sword.json", `{"model":{"model":"minecraft:item/diamond_sword"}}`)
 	writeRootJSON(t, root, "items/clock.json", `{"model":{"model":"minecraft:item/clock"}}`)
 	writeRootJSON(t, root, "models/item/player_head.json", `{"parent":"builtin/generated","textures":{"layer0":"minecraft:item/player_head"}}`)
+	writeRootJSON(t, root, "models/item/diamond_sword.json", `{"parent":"builtin/generated","textures":{"layer0":"minecraft:item/diamond_sword"}}`)
 	writeRootJSON(t, root, "models/item/clock.json", `{"parent":"builtin/generated","textures":{"layer0":"minecraft:item/clock"}}`)
 	writeRootPNG(t, filepath.Join(root, "textures", "block", "stone.png"), 16, 16, color.RGBA{R: 180, G: 30, B: 30, A: 255})
 	writeRootPNG(t, filepath.Join(root, "textures", "item", "player_head.png"), 16, 16, color.RGBA{R: 90, G: 90, B: 90, A: 255})
+	writeRootPNG(t, filepath.Join(root, "textures", "item", "diamond_sword.png"), 16, 16, color.RGBA{R: 40, G: 180, B: 220, A: 255})
 	writeRootAnimatedPNG(t, filepath.Join(root, "textures", "item", "clock.png"))
-	writeRootJSON(t, root, "textures/item/clock.png.mcmeta", `{"animation":{"frametime":1,"frames":[0,1],"width":16,"height":16}}`)
+	writeRootJSON(t, root, "textures/item/clock.png.mcmeta", `{"animation":{"frametime":1,"width":16,"height":16}}`)
 	return root
 }
 
@@ -382,7 +426,7 @@ func createRootSkyblockPack(t testing.TB, id string) string {
 	writeRootJSON(t, root, "assets/firmskyblock/models/item/animated_item.json", `{"parent":"builtin/generated","textures":{"layer0":"firmskyblock:item/animated_item"}}`)
 	writeRootPNG(t, filepath.Join(root, "assets", "firmskyblock", "textures", "item", "test_item.png"), 16, 16, color.RGBA{R: 40, G: 180, B: 220, A: 255})
 	writeRootAnimatedPNG(t, filepath.Join(root, "assets", "firmskyblock", "textures", "item", "animated_item.png"))
-	writeRootJSON(t, root, "assets/firmskyblock/textures/item/animated_item.png.mcmeta", `{"animation":{"frametime":1,"frames":[0,1],"width":16,"height":16}}`)
+	writeRootJSON(t, root, "assets/firmskyblock/textures/item/animated_item.png.mcmeta", `{"animation":{"frametime":1,"width":16,"height":16}}`)
 	if err := os.WriteFile(filepath.Join(root, "pack.png"), []byte{}, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -472,4 +516,54 @@ func assertWebPFile(t testing.TB, path string) {
 	if len(data) < 12 || string(data[:4]) != "RIFF" || string(data[8:12]) != "WEBP" {
 		t.Fatalf("file is not a webp: %s", path)
 	}
+}
+
+func assertCachedWebPHasColor(t testing.TB, path string, want color.NRGBA) {
+	t.Helper()
+	img, err := imagecache.ReadRGBA(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tolerance := 2
+	for y := 0; y < img.Bounds().Dy(); y++ {
+		for x := 0; x < img.Bounds().Dx(); x++ {
+			got := color.NRGBAModel.Convert(img.At(x, y)).(color.NRGBA)
+			if closeColor(got, want, tolerance) {
+				return
+			}
+		}
+	}
+	t.Fatalf("cached webp %s does not contain expected color near %#v; sample=%s", path, want, sampleOpaqueColors(img, 5))
+}
+
+func closeColor(got color.NRGBA, want color.NRGBA, tolerance int) bool {
+	return channelDelta(got.R, want.R) <= tolerance &&
+		channelDelta(got.G, want.G) <= tolerance &&
+		channelDelta(got.B, want.B) <= tolerance &&
+		channelDelta(got.A, want.A) <= tolerance
+}
+
+func channelDelta(a, b uint8) int {
+	if a > b {
+		return int(a - b)
+	}
+	return int(b - a)
+}
+
+func sampleOpaqueColors(img image.Image, limit int) string {
+	colors := make([]string, 0, limit)
+	for y := 0; y < img.Bounds().Dy(); y++ {
+		for x := 0; x < img.Bounds().Dx(); x++ {
+			got := color.NRGBAModel.Convert(img.At(x, y)).(color.NRGBA)
+			if got.A == 0 {
+				continue
+			}
+			colors = append(colors, fmt.Sprintf("(%d,%d,%d,%d)", got.R, got.G, got.B, got.A))
+			if len(colors) >= limit {
+				return strings.Join(colors, ",")
+			}
+		}
+	}
+	return strings.Join(colors, ",")
 }

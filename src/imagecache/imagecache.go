@@ -13,6 +13,8 @@ import (
 	"github.com/HugoSmits86/nativewebp"
 )
 
+const CacheFormatVersion = "2"
+
 func WriteWebPAtomic(targetPath string, img image.Image) error {
 	if img == nil {
 		return fmt.Errorf("image is nil")
@@ -92,6 +94,42 @@ func KeyedDir(root string, category string, namespace string, key string) string
 func HashKey(namespace string, key string) string {
 	sum := sha256.Sum256([]byte(strings.TrimSpace(namespace) + "|" + key))
 	return hex.EncodeToString(sum[:])
+}
+
+func EnsureCacheVersion(root string, version string, managedCategories ...string) error {
+	root = strings.TrimSpace(root)
+	version = strings.TrimSpace(version)
+	if root == "" {
+		return fmt.Errorf("cache root is empty")
+	}
+	if version == "" {
+		return fmt.Errorf("cache version is empty")
+	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return err
+	}
+
+	versionPath := filepath.Join(root, ".renderer-cache-version")
+	if data, err := os.ReadFile(versionPath); err == nil && strings.TrimSpace(string(data)) == version {
+		return nil
+	} else if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+
+	for _, category := range managedCategories {
+		category = strings.TrimSpace(category)
+		if category == "" {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(root, sanitizeCategory(category))); err != nil {
+			return err
+		}
+	}
+
+	return writeAtomic(versionPath, func(file *os.File) error {
+		_, err := file.WriteString(version + "\n")
+		return err
+	})
 }
 
 func imageForWebP(img image.Image) image.Image {
