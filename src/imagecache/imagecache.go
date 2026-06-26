@@ -13,7 +13,7 @@ import (
 	"github.com/HugoSmits86/nativewebp"
 )
 
-const CacheFormatVersion = "3"
+const CacheFormatVersion = "4"
 
 func WriteWebPAtomic(targetPath string, img image.Image) error {
 	if img == nil {

@@ -22,7 +22,7 @@ import (
 
 var VanillaPackId = "vanilla"
 
-var RendererVersion = "0.1.2"
+var RendererVersion = "0.1.3"
 
 type ItemRenderCapture struct {
 	OriginalTarget    string

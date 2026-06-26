@@ -1239,18 +1239,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) AlignImageToBottom(img *i
 }
 
 func drawImage(dst *image.RGBA, src *image.RGBA, offset image.Point) {
-	for y := 0; y < src.Bounds().Dy(); y++ {
-		for x := 0; x < src.Bounds().Dx(); x++ {
-			srcX := x
-			srcY := y
-			dstX := x + offset.X
-			dstY := y + offset.Y
-
-			if dstX >= dst.Bounds().Min.X && dstX < dst.Bounds().Max.X && dstY >= dst.Bounds().Min.Y && dstY < dst.Bounds().Max.Y {
-				dst.Set(dstX, dstY, src.At(srcX, srcY))
-			}
-		}
-	}
+	draw.Draw(dst, src.Bounds().Add(offset), src, src.Bounds().Min, draw.Over)
 }
 
 func clearImage(img *image.RGBA) {

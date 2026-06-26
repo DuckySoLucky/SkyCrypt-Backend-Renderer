@@ -103,6 +103,30 @@ func TestCreateFromResourceProviderAndAnimatedRender(t *testing.T) {
 	}
 }
 
+func TestRenderFlatItemCompositesTransparentModelLayers(t *testing.T) {
+	assetsRoot := createMinimalAssets(t)
+	writeJSON(t, assetsRoot, "items/layered_item.json", `{"model":{"model":"minecraft:item/layered_item"}}`)
+	writeJSON(t, assetsRoot, "models/item/layered_item.json", `{"parent":"builtin/generated","textures":{"layer0":"minecraft:item/layer_base","layer1":"minecraft:item/layer_empty"}}`)
+	writePNG(t, filepath.Join(assetsRoot, "textures", "item", "layer_base.png"), 16, 16, color.RGBA{R: 40, G: 180, B: 220, A: 255})
+	writeTransparentPNG(t, filepath.Join(assetsRoot, "textures", "item", "layer_empty.png"), 16, 16)
+
+	renderer, err := CreateFromDataDirectory(assetsRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rendered := renderer.RenderGuiItemWithResourceId("layered_item", &BlockRenderOptions{Size: 32})
+	if rendered == nil || rendered.Image == nil {
+		t.Fatal("rendered image is nil")
+	}
+
+	got := rendered.Image.RGBAAt(16, 16)
+	want := color.RGBA{R: 40, G: 180, B: 220, A: 255}
+	if got != want {
+		t.Fatalf("transparent top layer erased base layer: center=%#v, want %#v", got, want)
+	}
+}
+
 func TestMinecraftAtlasGeneratorOrderingAndEntryErrors(t *testing.T) {
 	renderer, err := CreateFromDataDirectory(createMinimalAssets(t))
 	if err != nil {
@@ -179,6 +203,22 @@ func writePNG(t *testing.T, path string, width int, height int, c color.RGBA) {
 			img.SetRGBA(x, y, c)
 		}
 	}
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if err := png.Encode(file, img); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeTransparentPNG(t *testing.T, path string, width int, height int) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
 	file, err := os.Create(path)
 	if err != nil {
 		t.Fatal(err)
