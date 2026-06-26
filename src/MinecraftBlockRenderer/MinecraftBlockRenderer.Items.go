@@ -310,8 +310,8 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) GetFirmamentModel(itemDat
 
 	if itemData.CustomData != nil {
 		if tag, ok := itemData.CustomData.Get("id"); ok {
-			if idTag, ok := tag.(nbt.NbtString); ok && strings.TrimSpace(idTag.Value) != "" {
-				encodedId := _minecraftBlockRenderer.EncodeFirmamentId(idTag.Value)
+			if rawSkyblockId, ok := nbtStringFromTag(tag); ok && strings.TrimSpace(rawSkyblockId) != "" {
+				encodedId := _minecraftBlockRenderer.EncodeFirmamentId(rawSkyblockId)
 				firmamentModel := "firmskyblock:item/" + encodedId
 				return &firmamentModel
 			}
@@ -749,11 +749,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryGetString(compound *nb
 		return "", false
 	}
 
-	if nbtString, ok := tag.(nbt.NbtString); ok {
-		return nbtString.Value, true
-	}
-
-	return "", false
+	return nbtStringFromTag(tag)
 }
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) MergeCustomDataCompounds(base *nbt.NbtCompound, overlay *nbt.NbtCompound) *nbt.NbtCompound {

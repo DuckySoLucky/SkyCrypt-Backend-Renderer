@@ -451,6 +451,10 @@ func renderedWebPPath(cacheDir string, resourceID string) string {
 	return filepath.Join(cacheDir, "rendered", resourceID+".webp")
 }
 
+func renderedPNGPathFromWebP(webpPath string) string {
+	return strings.TrimSuffix(webpPath, filepath.Ext(webpPath)) + ".png"
+}
+
 func sourcePackID(resourceID *mbr.ResourceIdResult) string {
 	if resourceID == nil || strings.TrimSpace(resourceID.SourcePackId) == "" {
 		return mbr.VanillaPackId
@@ -468,14 +472,14 @@ func writeRenderedWebP(targetPath string, rendered *mbr.AnimatedRenderedResource
 		if rendered.Image == nil {
 			return fmt.Errorf("rendered image is nil")
 		}
-		return imagecache.WriteWebPAtomic(targetPath, rendered.Image)
+		return writeRenderedStillImages(targetPath, rendered.Image)
 	}
 
 	if len(frames) == 1 {
 		if frames[0].Image == nil {
 			return fmt.Errorf("rendered frame image is nil")
 		}
-		return imagecache.WriteWebPAtomic(targetPath, frames[0].Image)
+		return writeRenderedStillImages(targetPath, frames[0].Image)
 	}
 
 	images := make([]image.Image, 0, len(frames))
@@ -491,7 +495,17 @@ func writeRenderedWebP(targetPath string, rendered *mbr.AnimatedRenderedResource
 		images = append(images, frame.Image)
 		durations = append(durations, uint(duration))
 	}
-	return imagecache.WriteAnimatedWebPAtomic(targetPath, images, durations)
+	if err := imagecache.WriteAnimatedWebPAtomic(targetPath, images, durations); err != nil {
+		return err
+	}
+	return imagecache.WritePNGAtomic(renderedPNGPathFromWebP(targetPath), frames[0].Image)
+}
+
+func writeRenderedStillImages(targetPath string, img image.Image) error {
+	if err := imagecache.WriteWebPAtomic(targetPath, img); err != nil {
+		return err
+	}
+	return imagecache.WritePNGAtomic(renderedPNGPathFromWebP(targetPath), img)
 }
 
 func cloneRenderedItem(item *RenderedItem) *RenderedItem {

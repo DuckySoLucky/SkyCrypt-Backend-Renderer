@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	mbr "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/MinecraftBlockRenderer"
+	nbt "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/NBT"
 	texturepacks "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/TexturePacks"
 	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/imagecache"
 )
@@ -91,6 +92,12 @@ func TestRenderSkyBlockItemIDWritesWebPCache(t *testing.T) {
 func TestRenderItemNBTWritesWebPCache(t *testing.T) {
 	renderer := newTestRenderer(t)
 
+	expectedResource, err := renderer.MinecraftRenderer().ComputeResourceIdFromSkyBlockItemID("TEST_ITEM", renderer.renderOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedPath := renderedWebPPath(renderer.cacheDir, expectedResource.ResourceId)
+
 	item, err := renderer.RenderItemNBT(map[string]any{
 		"id": "minecraft:player_head",
 		"tag": map[string]any{
@@ -102,7 +109,38 @@ func TestRenderItemNBTWritesWebPCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertRenderedItem(t, renderer, item, mbr.VanillaPackId)
+	if item.Path != expectedPath {
+		t.Fatalf("RenderItemNBT path = %q, want SkyBlock ID path %q", item.Path, expectedPath)
+	}
+	assertRenderedItem(t, renderer, item, sourcePackID(expectedResource))
+}
+
+func TestRenderItemNBTCompoundWritesSkyBlockPackCache(t *testing.T) {
+	renderer := newTestRenderer(t)
+
+	expectedResource, err := renderer.MinecraftRenderer().ComputeResourceIdFromSkyBlockItemID("TEST_ITEM", renderer.renderOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rootID := nbt.NewNbtString("minecraft:player_head")
+	extraID := nbt.NewNbtString("TEST_ITEM")
+	item, err := renderer.RenderItemNBT(nbt.NewNbtCompound(map[string]nbt.NbtTag{
+		"id": &rootID,
+		"tag": nbt.NewNbtCompound(map[string]nbt.NbtTag{
+			"ExtraAttributes": nbt.NewNbtCompound(map[string]nbt.NbtTag{
+				"id": &extraID,
+			}),
+		}),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.Path != renderedWebPPath(renderer.cacheDir, expectedResource.ResourceId) {
+		t.Fatalf("RenderItemNBT path = %q, want SkyBlock ID path", item.Path)
+	}
+	assertRenderedItem(t, renderer, item, sourcePackID(expectedResource))
+	assertCachedWebPHasNonBlackOpaqueColor(t, item.Path)
 }
 
 func TestRenderItemNBTWebPKeepsVanillaTextureColors(t *testing.T) {
@@ -158,6 +196,76 @@ func TestRenderItemNBTActualVanillaWebPVisibleToExternalDecoders(t *testing.T) {
 		t.Fatalf("magick decode failed: %v\n%s", err, strings.TrimSpace(string(out)))
 	}
 	assertPNGHasNonBlackOpaqueColor(t, decodedPath)
+}
+
+func TestRenderItemNBTRealPackWebPMatchesPrerender(t *testing.T) {
+	assetsRoot := filepath.Join("packs", "assets", "minecraft")
+	if _, err := os.Stat(filepath.Join(assetsRoot, "items", "player_head.json")); err != nil {
+		t.Skip("local vanilla assets not available")
+	}
+	resourcePacksRoot := "texturepacks"
+	if _, err := os.Stat(filepath.Join(resourcePacksRoot, "fsr", "meta.json")); err != nil {
+		t.Skip("local fsr texture pack not available")
+	}
+
+	newRealRenderer := func(t testing.TB) *Renderer {
+		t.Helper()
+		renderer, err := NewRenderer(Options{
+			AssetsRoot:        assetsRoot,
+			ResourcePacksRoot: resourcePacksRoot,
+			PackIDs:           []string{"fsr"},
+			CacheDir:          t.TempDir(),
+			Size:              96,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return renderer
+	}
+
+	const skyblockID = "CROWN_OF_AVARICE"
+	prerenderer := newRealRenderer(t)
+	prerendered, err := prerenderer.PreRenderSkyBlockItemIDs(context.Background(), []string{skyblockID}, PreRenderOptions{
+		Overwrite: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prerendered.Succeeded != 1 || prerendered.Entries[0].Error != "" {
+		t.Fatalf("unexpected prerender result: %#v", prerendered)
+	}
+	prerenderPath := prerendered.Entries[0].Path
+	assertCachedWebPHasNonBlackOpaqueColor(t, prerenderPath)
+
+	nbtRenderer := newRealRenderer(t)
+	renderedNBT, err := nbtRenderer.RenderItemNBT(map[string]any{
+		"id":    "minecraft:player_head",
+		"Count": 1,
+		"tag": map[string]any{
+			"ExtraAttributes": map[string]any{
+				"id": skyblockID,
+			},
+			"SkullOwner": map[string]any{
+				"Properties": map[string]any{
+					"textures": []any{
+						map[string]any{
+							"Value": "dummy-test-texture-value",
+						},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Base(renderedNBT.Path) != filepath.Base(prerenderPath) {
+		t.Fatalf("RenderItemNBT cache key = %q, want prerender key %q", filepath.Base(renderedNBT.Path), filepath.Base(prerenderPath))
+	}
+	if renderedNBT.TexturePackID != prerendered.Entries[0].TexturePackID {
+		t.Fatalf("RenderItemNBT texture pack = %q, want prerender pack %q", renderedNBT.TexturePackID, prerendered.Entries[0].TexturePackID)
+	}
+	assertCachedWebPHasNonBlackOpaqueColor(t, renderedNBT.Path)
 }
 
 func TestRenderSkyBlockItemIDReusesExistingWebPCache(t *testing.T) {
@@ -537,6 +645,7 @@ func assertRenderedItem(t testing.TB, renderer *Renderer, item *RenderedItem, te
 	}
 	assertRenderedPath(t, renderer, item.Path)
 	assertWebPFile(t, item.Path)
+	assertPNGFile(t, renderedPNGPathFromWebP(item.Path))
 }
 
 func assertRenderedPath(t testing.TB, renderer *Renderer, path string) {
@@ -561,6 +670,17 @@ func assertWebPFile(t testing.TB, path string) {
 	}
 }
 
+func assertPNGFile(t testing.TB, path string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) < 8 || string(data[:8]) != "\x89PNG\r\n\x1a\n" {
+		t.Fatalf("file is not a png: %s", path)
+	}
+}
+
 func assertCachedWebPHasColor(t testing.TB, path string, want color.NRGBA) {
 	t.Helper()
 	img, err := imagecache.ReadRGBA(path)
@@ -578,6 +698,23 @@ func assertCachedWebPHasColor(t testing.TB, path string, want color.NRGBA) {
 		}
 	}
 	t.Fatalf("cached webp %s does not contain expected color near %#v; sample=%s", path, want, sampleOpaqueColors(img, 5))
+}
+
+func assertCachedWebPHasNonBlackOpaqueColor(t testing.TB, path string) {
+	t.Helper()
+	img, err := imagecache.ReadRGBA(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for y := 0; y < img.Bounds().Dy(); y++ {
+		for x := 0; x < img.Bounds().Dx(); x++ {
+			got := color.NRGBAModel.Convert(img.At(x, y)).(color.NRGBA)
+			if got.A > 0 && (got.R > 4 || got.G > 4 || got.B > 4) {
+				return
+			}
+		}
+	}
+	t.Fatalf("cached webp %s has no non-black opaque color; sample=%s", path, sampleOpaqueColors(img, 10))
 }
 
 func closeColor(got color.NRGBA, want color.NRGBA, tolerance int) bool {

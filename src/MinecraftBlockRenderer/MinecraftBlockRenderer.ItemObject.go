@@ -19,7 +19,10 @@ func (renderer *MinecraftBlockRenderer) RenderItemObject(item any, options *Bloc
 		return nil, fmt.Errorf("unable to resolve item id from input type %T", item)
 	}
 
-	return renderer.RenderItem(itemName, itemData, options), nil
+	effectiveOptions := mergeItemObjectOptions(options, itemData)
+	itemName = renderer.resolvePackedSkyblockItemObjectName(normalized, itemName, effectiveOptions)
+	effectiveOptions = renderer.normalizePackedSkyblockItemObjectOptions(normalized, effectiveOptions)
+	return renderer.RenderItem(itemName, effectiveOptions.ItemData, effectiveOptions), nil
 }
 
 func (renderer *MinecraftBlockRenderer) RenderItemObjectWithResourceId(item any, options *BlockRenderOptions) (*RenderedResource, error) {
@@ -34,6 +37,8 @@ func (renderer *MinecraftBlockRenderer) RenderItemObjectWithResourceId(item any,
 	}
 
 	effectiveOptions := mergeItemObjectOptions(options, itemData)
+	itemName = renderer.resolvePackedSkyblockItemObjectName(normalized, itemName, effectiveOptions)
+	effectiveOptions = renderer.normalizePackedSkyblockItemObjectOptions(normalized, effectiveOptions)
 	return renderer.RenderGuiItemWithResourceId(itemName, effectiveOptions), nil
 }
 
@@ -49,6 +54,8 @@ func (renderer *MinecraftBlockRenderer) RenderAnimatedItemObjectWithResourceId(i
 	}
 
 	effectiveOptions := mergeItemObjectOptions(options, itemData)
+	itemName = renderer.resolvePackedSkyblockItemObjectName(normalized, itemName, effectiveOptions)
+	effectiveOptions = renderer.normalizePackedSkyblockItemObjectOptions(normalized, effectiveOptions)
 	return renderer.RenderAnimatedGuiItemWithResourceId(itemName, effectiveOptions)
 }
 
@@ -101,6 +108,8 @@ func (renderer *MinecraftBlockRenderer) ComputeResourceIdFromItemObject(item any
 	}
 
 	effectiveOptions := mergeItemObjectOptions(options, itemData)
+	itemName = renderer.resolvePackedSkyblockItemObjectName(normalized, itemName, effectiveOptions)
+	effectiveOptions = renderer.normalizePackedSkyblockItemObjectOptions(normalized, effectiveOptions)
 	rendererForOptions, forwardedOptions := renderer.ResolveRendererForOptions(*effectiveOptions)
 	return rendererForOptions.ComputeResourceIdInternal(itemName, forwardedOptions, nil), nil
 }
@@ -128,6 +137,31 @@ func (renderer *MinecraftBlockRenderer) prepareItemObjectRender(normalized *data
 	itemName := renderer.resolveItemObjectName(normalized)
 	itemData := buildItemObjectRenderData(normalized)
 	return itemName, itemData
+}
+
+func (renderer *MinecraftBlockRenderer) resolvePackedSkyblockItemObjectName(normalized *data.NormalizedItemInput, itemName string, options *BlockRenderOptions) string {
+	if normalized == nil || options == nil || len(options.PackIds) == 0 {
+		return itemName
+	}
+	if strings.TrimSpace(normalized.SkyblockID) == "" {
+		return itemName
+	}
+	return "firmskyblock:item/" + renderer.EncodeFirmamentId(normalized.SkyblockID)
+}
+
+func (renderer *MinecraftBlockRenderer) normalizePackedSkyblockItemObjectOptions(normalized *data.NormalizedItemInput, options *BlockRenderOptions) *BlockRenderOptions {
+	if normalized == nil || options == nil || len(options.PackIds) == 0 {
+		return options
+	}
+	if strings.TrimSpace(normalized.SkyblockID) == "" || options.ItemData == nil || options.ItemData.Profile == nil {
+		return options
+	}
+
+	effectiveOptions := *options
+	itemData := *options.ItemData
+	itemData.Profile = nil
+	effectiveOptions.ItemData = &itemData
+	return &effectiveOptions
 }
 
 func (renderer *MinecraftBlockRenderer) resolveItemObjectName(normalized *data.NormalizedItemInput) string {
