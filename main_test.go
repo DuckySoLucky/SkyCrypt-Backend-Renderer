@@ -591,6 +591,14 @@ func TestPreRenderSkyBlockItemIDsSkipsMissingCustomTexture(t *testing.T) {
 	if _, err := os.Stat(expectedPath); !os.IsNotExist(err) {
 		t.Fatalf("missing custom texture was written to disk at %q, stat err=%v", expectedPath, err)
 	}
+
+	rendered, err := renderer.RenderSkyBlockItemID("BROKEN_TEXTURE")
+	if err == nil {
+		t.Fatalf("expected direct render to fail for missing custom texture, got %+v", rendered)
+	}
+	if _, err := os.Stat(expectedPath); !os.IsNotExist(err) {
+		t.Fatalf("direct render wrote missing custom texture to disk at %q, stat err=%v", expectedPath, err)
+	}
 }
 
 func TestPreRenderSkyBlockItemIDsSkipsExistingUnlessOverwrite(t *testing.T) {

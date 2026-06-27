@@ -1,7 +1,9 @@
 package minecraftblockrenderer
 
 import (
+	nbt "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/NBT"
 	texturepacks "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/TexturePacks"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
 	"image/color"
 	"os"
 	"path/filepath"
@@ -210,6 +212,22 @@ func TestMissingSkyBlockCustomSkullReturnsError(t *testing.T) {
 		t.Fatalf("expected missing custom skull render to fail, got rendered=%+v", rendered)
 	}
 	_ = sawResolver
+}
+
+func TestTryResolveHeadSkinIgnoresMissingTextureOverride(t *testing.T) {
+	assetsRoot := createMinimalAssets(t)
+	registry := texturepacks.NewTexturePackRegistry()
+	renderer := CreateFromMinecraftAssets(assetsRoot, registry, nil)
+
+	options := DefaultBlockRenderOptions()
+	options.ItemData = &data.ItemRenderData{CustomData: nbt.NewNbtCompound(map[string]nbt.NbtTag{
+		"texture": nbt.NewNbtString("minecraft:item/not_a_real_head_skin"),
+	})}
+
+	skin := renderer.TryResolveHeadSkin("minecraft:player_head", options)
+	if skin != nil && renderer._textureRepository.IsMissingTexture(skin) {
+		t.Fatal("missing texture placeholder was accepted as a resolved head skin")
+	}
 }
 
 func TestFirmamentCompositeSkyBlockItemRendersAllLayers(t *testing.T) {

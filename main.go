@@ -116,7 +116,7 @@ func NewRendererWithOptions(options Options) (*Renderer, error) {
 	blockRenderer := mbr.CreateFromMinecraftAssets(options.AssetsRoot, registry, packIDs)
 	blockRenderer.SetCacheDirectory(cacheDir)
 	if options.Preload {
-		blockRenderer.PreloadRegisteredPacks(true)
+		blockRenderer.PreloadTexturePackStacks([][]string{packIDs})
 	}
 
 	return &Renderer{
@@ -156,11 +156,22 @@ func (r *Renderer) RenderSkyBlockItemID(id string) (*RenderedItem, error) {
 	return r.cachedSkyBlockItemID(id, false)
 }
 
+func (r *Renderer) RenderSkyBlockItemIDWithPackIDs(id string, packIDs []string) (*RenderedItem, error) {
+	if len(packIDs) == 0 {
+		return r.RenderSkyBlockItemID(id)
+	}
+	return r.cachedSkyBlockItemIDWithPackIDs(id, packIDs, false)
+}
+
 func (r *Renderer) RenderItemNBT(item any) (*RenderedItem, error) {
+	return r.RenderItemNBTWithPackIDs(item, r.PackIDs())
+}
+
+func (r *Renderer) RenderItemNBTWithPackIDs(item any, packIDs []string) (*RenderedItem, error) {
 	if r == nil || r.renderer == nil {
 		return nil, fmt.Errorf("renderer is nil")
 	}
-	options := r.renderOptions()
+	options := r.renderOptionsWithPackIDs(packIDs)
 	debugInfo := debugInfoFromItemInput(item)
 	return r.cachedRenderedItem(
 		false,
@@ -314,10 +325,14 @@ func (r *Renderer) PreRenderSkyBlockItemIDs(ctx context.Context, ids []string, o
 }
 
 func (r *Renderer) renderOptions() *mbr.BlockRenderOptions {
-	return &mbr.BlockRenderOptions{
-		Size:    r.Size(),
-		PackIds: r.packIDs,
-	}
+	return r.renderOptionsWithPackIDs(r.PackIDs())
+}
+
+func (r *Renderer) renderOptionsWithPackIDs(packIDs []string) *mbr.BlockRenderOptions {
+	options := mbr.DefaultBlockRenderOptions()
+	options.Size = r.Size()
+	options.PackIds = append([]string(nil), packIDs...)
+	return &options
 }
 
 func (r *Renderer) requireCacheDir() (string, error) {
@@ -332,10 +347,14 @@ func (r *Renderer) requireCacheDir() (string, error) {
 }
 
 func (r *Renderer) cachedSkyBlockItemID(id string, overwrite bool) (*RenderedItem, error) {
+	return r.cachedSkyBlockItemIDWithPackIDs(id, r.PackIDs(), overwrite)
+}
+
+func (r *Renderer) cachedSkyBlockItemIDWithPackIDs(id string, packIDs []string, overwrite bool) (*RenderedItem, error) {
 	if r == nil || r.renderer == nil {
 		return nil, fmt.Errorf("renderer is nil")
 	}
-	options := r.renderOptions()
+	options := r.renderOptionsWithPackIDs(packIDs)
 	return r.cachedRenderedItem(
 		overwrite,
 		&renderDebugInfo{SkyBlockID: id, MinecraftID: "minecraft:player_head"},
@@ -349,10 +368,14 @@ func (r *Renderer) cachedSkyBlockItemID(id string, overwrite bool) (*RenderedIte
 }
 
 func (r *Renderer) preRenderSkyBlockItemID(id string, overwrite bool) (*RenderedItem, bool, error) {
+	return r.preRenderSkyBlockItemIDWithPackIDs(id, r.PackIDs(), overwrite)
+}
+
+func (r *Renderer) preRenderSkyBlockItemIDWithPackIDs(id string, packIDs []string, overwrite bool) (*RenderedItem, bool, error) {
 	if r == nil || r.renderer == nil {
 		return nil, false, fmt.Errorf("renderer is nil")
 	}
-	options := r.renderOptions()
+	options := r.renderOptionsWithPackIDs(packIDs)
 	return r.cachedRenderedItemWithSkip(
 		overwrite,
 		&renderDebugInfo{SkyBlockID: id, MinecraftID: "minecraft:player_head"},
@@ -396,6 +419,9 @@ func (r *Renderer) cachedRenderedItemWithSkip(
 			}
 			return nil, true, nil
 		}
+	}
+	if err := r.validateResolvedTextures(resourceID, debugInfo); err != nil {
+		return nil, false, err
 	}
 
 	key := resourceID.ResourceId
@@ -454,6 +480,30 @@ func (r *Renderer) cachedRenderedItemWithSkip(
 	r.rememberRenderedItem(key, target)
 	inflight.item = target
 	return cloneRenderedItem(target), false, nil
+}
+
+func (r *Renderer) validateResolvedTextures(resourceID *mbr.ResourceIdResult, debugInfo *renderDebugInfo) error {
+	if r == nil || r.renderer == nil || resourceID == nil {
+		return nil
+	}
+	skyBlockID := ""
+	minecraftID := ""
+	if debugInfo != nil {
+		skyBlockID = debugInfo.SkyBlockID
+		minecraftID = debugInfo.MinecraftID
+	}
+	for _, textureID := range resourceID.Textures {
+		if r.renderer.TextureIsMissing(textureID) {
+			return fmt.Errorf(
+				"resolved missing texture %q for skyblock_id=%q minecraft_id=%q model=%s",
+				textureID,
+				skyBlockID,
+				minecraftID,
+				debugStringValue(resourceID.Model),
+			)
+		}
+	}
+	return nil
 }
 
 func (r *Renderer) lookupRenderedItem(key string) *RenderedItem {

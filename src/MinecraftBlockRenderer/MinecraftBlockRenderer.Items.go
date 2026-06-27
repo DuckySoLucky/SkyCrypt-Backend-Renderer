@@ -1095,7 +1095,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryResolveHeadSkin(itemNa
 		textureId, found := _minecraftBlockRenderer.GetHeadTextureOverride(itemData.CustomData)
 		if found {
 			skin := _minecraftBlockRenderer._textureRepository.GetTexture(textureId)
-			if skin != nil {
+			if skin != nil && !_minecraftBlockRenderer._textureRepository.IsMissingTexture(skin) {
 				return skin
 			}
 		}

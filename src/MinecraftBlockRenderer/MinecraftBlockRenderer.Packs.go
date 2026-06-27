@@ -1102,6 +1102,9 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) PreloadTexturePackStacks(
 		if len(packIds) == 0 {
 			continue
 		}
+		if len(_minecraftBlockRenderer._packContext.PackIds) > 0 && PackSequencesEqual(packIds, _minecraftBlockRenderer._packContext.PackIds) {
+			continue
+		}
 
 		stack := _minecraftBlockRenderer._packRegistry.BuildPackStack(packIds)
 		if _, exists := seenStacks[stack.Fingerprint]; exists {
