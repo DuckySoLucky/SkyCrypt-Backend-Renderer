@@ -45,12 +45,14 @@ type PreRenderedItem struct {
 	Path          string
 	TexturePackID string
 	Error         string
+	Skipped       bool
 }
 
 type PreRenderResult struct {
 	Entries   []PreRenderedItem
 	Succeeded int
 	Failed    int
+	Skipped   int
 }
 
 type Renderer struct {
@@ -221,6 +223,7 @@ func (r *Renderer) PreRenderSkyBlockItemIDs(ctx context.Context, ids []string, o
 		inputID string
 		item    *RenderedItem
 		err     error
+		skipped bool
 	}
 
 	jobs := make(chan string)
@@ -232,8 +235,8 @@ func (r *Renderer) PreRenderSkyBlockItemIDs(ctx context.Context, ids []string, o
 		if err := ctx.Err(); err != nil {
 			return renderResult{inputID: id, err: err}
 		}
-		item, err := r.cachedSkyBlockItemID(id, options.Overwrite)
-		return renderResult{inputID: id, item: item, err: err}
+		item, skipped, err := r.preRenderSkyBlockItemID(id, options.Overwrite)
+		return renderResult{inputID: id, item: item, skipped: skipped, err: err}
 	}
 
 	for i := 0; i < workerCount; i++ {
@@ -289,6 +292,7 @@ func (r *Renderer) PreRenderSkyBlockItemIDs(ctx context.Context, ids []string, o
 			if rendered.err != nil {
 				entry.Error = rendered.err.Error()
 			}
+			entry.Skipped = rendered.skipped
 			result.Entries[index] = entry
 		}
 	}
@@ -296,6 +300,8 @@ func (r *Renderer) PreRenderSkyBlockItemIDs(ctx context.Context, ids []string, o
 	for _, entry := range result.Entries {
 		if entry.Error != "" {
 			result.Failed++
+		} else if entry.Skipped {
+			result.Skipped++
 		} else if strings.TrimSpace(entry.Path) != "" {
 			result.Succeeded++
 		}
@@ -342,17 +348,54 @@ func (r *Renderer) cachedSkyBlockItemID(id string, overwrite bool) (*RenderedIte
 	)
 }
 
+func (r *Renderer) preRenderSkyBlockItemID(id string, overwrite bool) (*RenderedItem, bool, error) {
+	if r == nil || r.renderer == nil {
+		return nil, false, fmt.Errorf("renderer is nil")
+	}
+	options := r.renderOptions()
+	return r.cachedRenderedItemWithSkip(
+		overwrite,
+		&renderDebugInfo{SkyBlockID: id, MinecraftID: "minecraft:player_head"},
+		func() (*mbr.ResourceIdResult, error) {
+			return r.renderer.ComputeResourceIdFromSkyBlockItemID(id, options)
+		},
+		func() (*mbr.AnimatedRenderedResource, error) {
+			return r.renderer.RenderAnimatedSkyBlockItemID(id, options)
+		},
+		r.shouldSkipPreRenderedSkyBlockResource(id),
+	)
+}
+
 func (r *Renderer) cachedRenderedItem(overwrite bool, debugInfo *renderDebugInfo, compute func() (*mbr.ResourceIdResult, error), render func() (*mbr.AnimatedRenderedResource, error)) (*RenderedItem, error) {
+	item, _, err := r.cachedRenderedItemWithSkip(overwrite, debugInfo, compute, render, nil)
+	return item, err
+}
+
+func (r *Renderer) cachedRenderedItemWithSkip(
+	overwrite bool,
+	debugInfo *renderDebugInfo,
+	compute func() (*mbr.ResourceIdResult, error),
+	render func() (*mbr.AnimatedRenderedResource, error),
+	shouldSkip func(*mbr.ResourceIdResult) (bool, string),
+) (*RenderedItem, bool, error) {
 	cacheDir, err := r.requireCacheDir()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	resourceID, err := compute()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if resourceID == nil || strings.TrimSpace(resourceID.ResourceId) == "" {
-		return nil, fmt.Errorf("resource id is empty")
+		return nil, false, fmt.Errorf("resource id is empty")
+	}
+	if shouldSkip != nil {
+		if skip, reason := shouldSkip(resourceID); skip {
+			if strings.TrimSpace(reason) != "" {
+				fmt.Println(reason)
+			}
+			return nil, true, nil
+		}
 	}
 
 	key := resourceID.ResourceId
@@ -363,13 +406,13 @@ func (r *Renderer) cachedRenderedItem(overwrite bool, debugInfo *renderDebugInfo
 
 	if !overwrite {
 		if cached := r.lookupRenderedItem(key); cached != nil {
-			return cached, nil
+			return cached, false, nil
 		}
 		if _, statErr := os.Stat(target.Path); statErr == nil {
 			r.rememberRenderedItem(key, target)
-			return cloneRenderedItem(target), nil
+			return cloneRenderedItem(target), false, nil
 		} else if !os.IsNotExist(statErr) {
-			return nil, statErr
+			return nil, false, statErr
 		}
 	}
 
@@ -377,40 +420,40 @@ func (r *Renderer) cachedRenderedItem(overwrite bool, debugInfo *renderDebugInfo
 	if !owner {
 		inflight.wg.Wait()
 		if inflight.err != nil {
-			return nil, inflight.err
+			return nil, false, inflight.err
 		}
-		return cloneRenderedItem(inflight.item), nil
+		return cloneRenderedItem(inflight.item), false, nil
 	}
 	defer r.finishRender(key, inflight)
 
 	if !overwrite {
 		if cached := r.lookupRenderedItem(key); cached != nil {
 			inflight.item = cached
-			return cloneRenderedItem(cached), nil
+			return cloneRenderedItem(cached), false, nil
 		}
 		if _, statErr := os.Stat(target.Path); statErr == nil {
 			r.rememberRenderedItem(key, target)
 			inflight.item = target
-			return cloneRenderedItem(target), nil
+			return cloneRenderedItem(target), false, nil
 		} else if !os.IsNotExist(statErr) {
 			inflight.err = statErr
-			return nil, statErr
+			return nil, false, statErr
 		}
 	}
 
 	rendered, err := render()
 	if err != nil {
 		inflight.err = err
-		return nil, err
+		return nil, false, err
 	}
 	if err := writeRenderedWebP(target.Path, rendered); err != nil {
 		inflight.err = err
-		return nil, err
+		return nil, false, err
 	}
 
 	r.rememberRenderedItem(key, target)
 	inflight.item = target
-	return cloneRenderedItem(target), nil
+	return cloneRenderedItem(target), false, nil
 }
 
 func (r *Renderer) lookupRenderedItem(key string) *RenderedItem {
@@ -658,6 +701,60 @@ func sourcePackID(resourceID *mbr.ResourceIdResult) string {
 		return mbr.VanillaPackId
 	}
 	return resourceID.SourcePackId
+}
+
+func (r *Renderer) shouldSkipPreRenderedSkyBlockResource(id string) func(*mbr.ResourceIdResult) (bool, string) {
+	expectedPacks := make(map[string]struct{}, len(r.packIDs))
+	for _, packID := range r.packIDs {
+		trimmed := strings.TrimSpace(packID)
+		if trimmed != "" {
+			expectedPacks[trimmed] = struct{}{}
+		}
+	}
+
+	return func(resourceID *mbr.ResourceIdResult) (bool, string) {
+		source := sourcePackID(resourceID)
+		if _, ok := expectedPacks[source]; !ok {
+			return true, fmt.Sprintf(
+				"warning: skyblock item %q was skipped during pre-render because no configured custom texture/model resolved; source=%q model=%s textures=%s",
+				id,
+				source,
+				debugStringValue(resourceID.Model),
+				strings.Join(resourceID.Textures, ","),
+			)
+		}
+
+		for _, textureID := range resourceID.Textures {
+			if r.renderer.TextureIsMissing(textureID) {
+				return true, fmt.Sprintf(
+					"warning: skyblock item %q was skipped during pre-render because texture %q could not be resolved; source=%q model=%s textures=%s",
+					id,
+					textureID,
+					source,
+					debugStringValue(resourceID.Model),
+					strings.Join(resourceID.Textures, ","),
+				)
+			}
+		}
+
+		if len(resourceID.Textures) == 0 {
+			return true, fmt.Sprintf(
+				"warning: skyblock item %q was skipped during pre-render because it resolved no textures; source=%q model=%s",
+				id,
+				source,
+				debugStringValue(resourceID.Model),
+			)
+		}
+
+		return false, ""
+	}
+}
+
+func debugStringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func writeRenderedWebP(targetPath string, rendered *mbr.AnimatedRenderedResource) error {

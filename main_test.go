@@ -544,6 +544,55 @@ func TestPreRenderSkyBlockItemIDsWritesWebPCache(t *testing.T) {
 	assertWebPFile(t, entry.Path)
 }
 
+func TestPreRenderSkyBlockItemIDsSkipsMissingCustomTexture(t *testing.T) {
+	assetsRoot := createRootMinimalAssets(t)
+	packRoot := createRootSkyblockPack(t, "testpack")
+	writeRootJSON(t, packRoot, "assets/skyblock/items/broken_texture.json", `{"model":{"type":"model","model":"firmskyblock:item/broken_texture"}}`)
+	writeRootJSON(t, packRoot, "assets/firmskyblock/models/item/broken_texture.json", `{"parent":"builtin/generated","textures":{"layer0":"firmskyblock:item/does_not_exist"}}`)
+
+	registry := texturepacks.NewTexturePackRegistry()
+	if _, err := registry.RegisterPack(packRoot); err != nil {
+		t.Fatal(err)
+	}
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	blockRenderer := mbr.CreateFromMinecraftAssets(assetsRoot, registry, []string{"testpack"})
+	blockRenderer.SetCacheDirectory(cacheDir)
+	renderer := &Renderer{
+		renderer:    blockRenderer,
+		packIDs:     []string{"testpack"},
+		size:        32,
+		cacheDir:    cacheDir,
+		renderCache: make(map[string]RenderedItem),
+		inflight:    make(map[string]*renderInflight),
+	}
+
+	expectedResource, err := renderer.MinecraftRenderer().ComputeResourceIdFromSkyBlockItemID("BROKEN_TEXTURE", renderer.renderOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedPath := renderedDebugWebPPath(renderer.cacheDir, expectedResource, &renderDebugInfo{
+		SkyBlockID:  "BROKEN_TEXTURE",
+		MinecraftID: "minecraft:player_head",
+	})
+
+	result, err := renderer.PreRenderSkyBlockItemIDs(context.Background(), []string{"BROKEN_TEXTURE"}, PreRenderOptions{
+		Workers: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Succeeded != 0 || result.Failed != 0 || result.Skipped != 1 {
+		t.Fatalf("result counts = %d succeeded, %d failed, %d skipped", result.Succeeded, result.Failed, result.Skipped)
+	}
+	entry := result.Entries[0]
+	if !entry.Skipped || entry.Path != "" || entry.TexturePackID != "" || entry.Error != "" {
+		t.Fatalf("unexpected skipped entry: %#v", entry)
+	}
+	if _, err := os.Stat(expectedPath); !os.IsNotExist(err) {
+		t.Fatalf("missing custom texture was written to disk at %q, stat err=%v", expectedPath, err)
+	}
+}
+
 func TestPreRenderSkyBlockItemIDsSkipsExistingUnlessOverwrite(t *testing.T) {
 	renderer := newTestRenderer(t)
 

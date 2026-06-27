@@ -368,6 +368,14 @@ func (renderer *MinecraftBlockRenderer) GetTexturePackIcon(packId string) (*imag
 	return decodeRGBA(file)
 }
 
+func (renderer *MinecraftBlockRenderer) TextureIsMissing(textureID string) bool {
+	if renderer == nil || renderer._textureRepository == nil {
+		return true
+	}
+	texture := renderer._textureRepository.GetTexture(textureID)
+	return texture == nil || renderer._textureRepository.IsMissingTexture(texture)
+}
+
 func decodeRGBA(reader io.Reader) (*image.RGBA, error) {
 	img, _, err := image.Decode(reader)
 	if err != nil {
