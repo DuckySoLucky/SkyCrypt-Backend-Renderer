@@ -35,7 +35,7 @@ func TestComputeResourceIdIncludesPackOverrides(t *testing.T) {
 	}
 }
 
-func TestMissingSkyBlockCustomTextureFallsBackToVanillaItem(t *testing.T) {
+func TestMissingSkyBlockCustomTextureReturnsError(t *testing.T) {
 	assetsRoot := createMinimalAssets(t)
 	packRoot := createEmptyPack(t, "emptypack")
 
@@ -53,22 +53,12 @@ func TestMissingSkyBlockCustomTextureFallsBackToVanillaItem(t *testing.T) {
 			},
 		},
 	}, &BlockRenderOptions{Size: 32, PackIds: []string{"emptypack"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if rendered == nil || !hasOpaquePixels(rendered.Image) {
-		t.Fatal("fallback render did not produce visible pixels")
-	}
-	model := ""
-	if rendered.ResourceId.Model != nil {
-		model = *rendered.ResourceId.Model
-	}
-	if rendered.ResourceId.SourcePackId != VanillaPackId || !strings.Contains(strings.ToLower(model), "diamond_sword") {
-		t.Fatalf("fallback did not resolve to vanilla diamond sword: source=%s model=%s textures=%v", rendered.ResourceId.SourcePackId, model, rendered.ResourceId.Textures)
+	if err == nil {
+		t.Fatalf("expected missing custom texture render to fail, got rendered=%+v", rendered)
 	}
 }
 
-func TestMissingSkyBlockCustomSkullFallsBackWithSkullResolver(t *testing.T) {
+func TestMissingSkyBlockCustomSkullReturnsError(t *testing.T) {
 	assetsRoot := createMinimalAssets(t)
 	packRoot := createEmptyPack(t, "emptypack")
 
@@ -98,14 +88,59 @@ func TestMissingSkyBlockCustomSkullFallsBackWithSkullResolver(t *testing.T) {
 			return &texture
 		},
 	})
+	if err == nil {
+		t.Fatalf("expected missing custom skull render to fail, got rendered=%+v", rendered)
+	}
+	_ = sawResolver
+}
+
+func TestFirmamentCompositeSkyBlockItemRendersAllLayers(t *testing.T) {
+	assetsRoot := createMinimalAssets(t)
+	packRoot := createEmptyPack(t, "testpack")
+	writeJSON(t, packRoot, "assets/skyblock/items/dark_claymore.json", `{"model":{"type":"composite","models":[
+		{"type":"model","model":"firmskyblock:item/dark_claymore_base"},
+		{"type":"model","model":"firmskyblock:item/dark_claymore_overlay"}
+	]}}`)
+	writeJSON(t, packRoot, "assets/firmskyblock/models/item/dark_claymore_base.json", `{"parent":"builtin/generated","textures":{"layer0":"firmskyblock:item/dark_claymore_base"}}`)
+	writeJSON(t, packRoot, "assets/firmskyblock/models/item/dark_claymore_overlay.json", `{"parent":"builtin/generated","textures":{"layer0":"firmskyblock:item/dark_claymore_overlay"}}`)
+	baseColor := color.RGBA{R: 44, G: 80, B: 220, A: 255}
+	overlayColor := color.RGBA{R: 230, G: 210, B: 40, A: 255}
+	writePNG(t, filepath.Join(packRoot, "assets", "firmskyblock", "textures", "item", "dark_claymore_base.png"), 16, 16, baseColor)
+	writeCenterPatchPNG(t, filepath.Join(packRoot, "assets", "firmskyblock", "textures", "item", "dark_claymore_overlay.png"), 16, 16, overlayColor)
+
+	registry := texturepacks.NewTexturePackRegistry()
+	if _, err := registry.RegisterPack(packRoot); err != nil {
+		t.Fatal(err)
+	}
+	renderer := CreateFromMinecraftAssets(assetsRoot, registry, nil)
+
+	rendered, err := renderer.RenderSkyBlockItemID("DARK_CLAYMORE", &BlockRenderOptions{
+		Size:    64,
+		PackIds: []string{"testpack"},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rendered == nil || !hasOpaquePixels(rendered.Image) {
-		t.Fatal("fallback skull render did not produce visible pixels")
+	if rendered == nil || rendered.Image == nil || !hasOpaquePixels(rendered.Image) {
+		t.Fatal("Firmament composite render did not produce visible pixels")
 	}
-	if !sawResolver {
-		t.Fatal("skull resolver was not called for fallback player head")
+	if !imageContainsApproxColor(rendered.Image, baseColor, 8) {
+		t.Fatalf("Firmament composite render does not contain base color; resource=%+v", rendered.ResourceId)
+	}
+	if !imageContainsApproxColor(rendered.Image, overlayColor, 8) {
+		t.Fatalf("Firmament composite render does not contain overlay color; resource=%+v", rendered.ResourceId)
+	}
+	if rendered.ResourceId.SourcePackId != "testpack" {
+		t.Fatalf("source pack = %q, want testpack; model=%v textures=%v", rendered.ResourceId.SourcePackId, rendered.ResourceId.Model, rendered.ResourceId.Textures)
+	}
+	if rendered.ResourceId.Model == nil || !strings.HasPrefix(*rendered.ResourceId.Model, "composite:") {
+		t.Fatalf("resource model = %v, want composite model", rendered.ResourceId.Model)
+	}
+	packRenderer, _ := renderer.ResolveRendererForOptions(BlockRenderOptions{PackIds: []string{"testpack"}})
+	for _, textureID := range rendered.ResourceId.Textures {
+		if packRenderer.TextureIsMissing(textureID) {
+			t.Fatalf("resource texture %q is missing; textures=%v", textureID, rendered.ResourceId.Textures)
+		}
 	}
 }
 

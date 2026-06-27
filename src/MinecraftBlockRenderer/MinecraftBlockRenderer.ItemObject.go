@@ -22,7 +22,11 @@ func (renderer *MinecraftBlockRenderer) RenderItemObject(item any, options *Bloc
 	effectiveOptions := mergeItemObjectOptions(options, itemData)
 	itemName = renderer.resolvePackedSkyblockItemObjectName(normalized, itemName, effectiveOptions)
 	effectiveOptions = renderer.normalizePackedSkyblockItemObjectOptions(normalized, effectiveOptions)
-	return renderer.RenderItem(itemName, effectiveOptions.ItemData, effectiveOptions), nil
+	rendered := renderer.RenderItem(itemName, effectiveOptions.ItemData, effectiveOptions)
+	if rendered == nil {
+		return nil, fmt.Errorf("failed to render item %s", itemName)
+	}
+	return rendered, nil
 }
 
 func (renderer *MinecraftBlockRenderer) RenderItemObjectWithResourceId(item any, options *BlockRenderOptions) (*RenderedResource, error) {
@@ -39,7 +43,11 @@ func (renderer *MinecraftBlockRenderer) RenderItemObjectWithResourceId(item any,
 	effectiveOptions := mergeItemObjectOptions(options, itemData)
 	itemName = renderer.resolvePackedSkyblockItemObjectName(normalized, itemName, effectiveOptions)
 	effectiveOptions = renderer.normalizePackedSkyblockItemObjectOptions(normalized, effectiveOptions)
-	return renderer.RenderGuiItemWithResourceId(itemName, effectiveOptions), nil
+	rendered := renderer.RenderGuiItemWithResourceId(itemName, effectiveOptions)
+	if rendered == nil {
+		return nil, fmt.Errorf("failed to render item %s", itemName)
+	}
+	return rendered, nil
 }
 
 func (renderer *MinecraftBlockRenderer) RenderAnimatedItemObjectWithResourceId(item any, options *BlockRenderOptions) (*AnimatedRenderedResource, error) {
@@ -64,7 +72,11 @@ func (renderer *MinecraftBlockRenderer) RenderSkyBlockItemID(skyBlockItemID stri
 	if err != nil {
 		return nil, err
 	}
-	return renderer.RenderGuiItemWithResourceId(target, effectiveOptions), nil
+	rendered := renderer.RenderGuiItemWithResourceId(target, effectiveOptions)
+	if rendered == nil {
+		return nil, fmt.Errorf("failed to render skyblock item %s", skyBlockItemID)
+	}
+	return rendered, nil
 }
 
 func (renderer *MinecraftBlockRenderer) RenderItemNBT(item any, options *BlockRenderOptions) (*RenderedResource, error) {

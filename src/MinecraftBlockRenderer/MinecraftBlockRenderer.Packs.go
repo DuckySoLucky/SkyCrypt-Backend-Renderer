@@ -25,13 +25,14 @@ var VanillaPackId = "vanilla"
 var RendererVersion = "0.1.5"
 
 type ItemRenderCapture struct {
-	OriginalTarget    string
-	NormalizedItemKey string
-	ItemInfo          *data.ItemInfo
-	Model             *data.BlockModelInstance
-	ModelCandidates   []string
-	ResolvedModelName *string
-	FinalOptions      *BlockRenderOptions
+	OriginalTarget      string
+	NormalizedItemKey   string
+	ItemInfo            *data.ItemInfo
+	Model               *data.BlockModelInstance
+	ModelCandidates     []string
+	ResolvedModelName   *string
+	CompositeModelNames []string
+	FinalOptions        *BlockRenderOptions
 }
 
 // public ItemModelResolution? ToResolution() {
@@ -48,11 +49,12 @@ func (r *ItemRenderCapture) ToResolution() *ItemModelResolution {
 	}
 
 	return &ItemModelResolution{
-		LookupTarget:      r.NormalizedItemKey,
-		ItemInfo:          r.ItemInfo,
-		Model:             r.Model,
-		ModelCandidates:   r.ModelCandidates,
-		ResolvedModelName: r.ResolvedModelName,
+		LookupTarget:        r.NormalizedItemKey,
+		ItemInfo:            r.ItemInfo,
+		Model:               r.Model,
+		ModelCandidates:     r.ModelCandidates,
+		ResolvedModelName:   r.ResolvedModelName,
+		CompositeModelNames: r.CompositeModelNames,
 	}
 }
 
@@ -435,18 +437,20 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) ComputeResourceIdInternal
 		var effectiveModelIdentifier *string = nil
 		var modelCandidates []string = nil
 		var resolvedModelName *string = nil
+		var compositeModelNames []string = nil
 
 		if preResolvedItem != nil && strings.EqualFold(preResolvedItem.LookupTarget, lookupTarget) {
 			effectiveModel = preResolvedItem.Model
 			modelCandidates = preResolvedItem.ModelCandidates
 			resolvedModelName = preResolvedItem.ResolvedModelName
+			compositeModelNames = preResolvedItem.CompositeModelNames
 			if preResolvedItem.ItemInfo != nil {
 				info = preResolvedItem.ItemInfo
 			}
 		} else {
 			// Always use ResolveItemModel for consistent resolution logic
 			// (it handles selectors, Firmament models, and all other item model types)
-			effectiveModel, modelCandidates, resolvedModelName = _minecraftBlockRenderer.ResolveItemModel(lookupTarget, info, options)
+			effectiveModel, modelCandidates, resolvedModelName, compositeModelNames = _minecraftBlockRenderer.ResolveItemModel(lookupTarget, info, options)
 		}
 
 		effectiveModelIdentifier = resolvedModelName
@@ -454,7 +458,36 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) ComputeResourceIdInternal
 			effectiveModelIdentifier = &effectiveModel.Name
 		}
 
-		if effectiveModel != nil {
+		if len(compositeModelNames) > 1 {
+			var identifiers []string
+			for _, compositeModelName := range compositeModelNames {
+				if strings.TrimSpace(compositeModelName) == "" {
+					continue
+				}
+				compositeModelNameCopy := compositeModelName
+				compositeModel := _minecraftBlockRenderer.ResolveModelOrNull(&compositeModelNameCopy)
+				if compositeModel == nil {
+					continue
+				}
+
+				identifier := _minecraftBlockRenderer.NormalizeModelIdentifier(compositeModelName)
+				identifiers = append(identifiers, identifier)
+				if primaryModelIdentifier == nil {
+					primaryModelIdentifier = &identifier
+				}
+				for _, texture := range _minecraftBlockRenderer.CollectResolvedTextures(compositeModel) {
+					resolvedTextures[texture] = struct{}{}
+				}
+			}
+
+			if len(identifiers) > 0 {
+				compositePath := "composite:" + strings.Join(identifiers, "+")
+				modelPath = &compositePath
+				referenceModel = &identifiers[0]
+			}
+		}
+
+		if modelPath == nil && effectiveModel != nil {
 			input := effectiveModelIdentifier
 			if input == nil {
 				input = &effectiveModel.Name
@@ -584,11 +617,12 @@ type ResourceIdResult struct {
 }
 
 type ItemModelResolution struct {
-	LookupTarget      string
-	ItemInfo          *data.ItemInfo
-	Model             *data.BlockModelInstance
-	ModelCandidates   []string
-	ResolvedModelName *string
+	LookupTarget        string
+	ItemInfo            *data.ItemInfo
+	Model               *data.BlockModelInstance
+	ModelCandidates     []string
+	ResolvedModelName   *string
+	CompositeModelNames []string
 }
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) CollectResolvedTextures(model *data.BlockModelInstance) []string {

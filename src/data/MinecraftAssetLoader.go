@@ -681,6 +681,8 @@ func MinecraftAssetsLoadItemInfosFrom(assetsRoot string, models map[string]Block
 				info.LayerTints[layerIndex] = tintInfo
 			}
 		}
+
+		entries[itemName] = info
 	}
 
 	var result []ItemInfo
@@ -742,7 +744,10 @@ func EnumerateItemDefinitions(assetsRoot string, overlayRoots []string, assetNam
 
 			tintMap := make(map[int]ItemTintInfo)
 			ExtractTintInfoFromDefinition(itemData, tintMap)
-			selector := ParseItemModelSelectorFromRoot(itemData)
+			selector, err := ParseItemModelSelectorFromJSON([]byte(jsonContent))
+			if err != nil {
+				selector = nil
+			}
 			modelReference := ResolveModelReferenceFromItemDefinition(itemData)
 
 			entry := ItemDefinitionEntry{

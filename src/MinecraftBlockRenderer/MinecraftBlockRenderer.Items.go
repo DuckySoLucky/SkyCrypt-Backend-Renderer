@@ -12,6 +12,7 @@ import (
 	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/imagecache"
 	"image"
 	"image/color"
+	imagedraw "image/draw"
 	"math"
 	"net/http"
 	"net/url"
@@ -104,6 +105,9 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderGuiItemInternal(ite
 	alignToBottom := _minecraftBlockRenderer.ShouldAlignGuiItemToBottom(normalizedItemKey)
 	var postScale *float64
 	finalizeGuiResult := func(img *image.RGBA) *image.RGBA {
+		if img == nil {
+			return nil
+		}
 		if capture != nil {
 			capture.FinalOptions = options
 		}
@@ -124,7 +128,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderGuiItemInternal(ite
 		capture.ItemInfo = itemInfo
 	}
 
-	model, candidates, resolvedModelName := _minecraftBlockRenderer.ResolveItemModel(normalizedItemKey, itemInfo, *options)
+	model, candidates, resolvedModelName, compositeModelNames := _minecraftBlockRenderer.ResolveItemModel(normalizedItemKey, itemInfo, *options)
 	// Console.WriteLine($"Resolved model for item '{itemName}': '{model?.Name}' with candidates [{string.Join(", ", modelCandidates)}].");
 	_ = candidates
 
@@ -132,10 +136,17 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderGuiItemInternal(ite
 		capture.Model = model
 		capture.ModelCandidates = candidates
 		capture.ResolvedModelName = resolvedModelName
+		capture.CompositeModelNames = compositeModelNames
 	}
 
 	if _minecraftBlockRenderer.IsBannerItem(normalizedItemKey) || (resolvedModelName != nil && _minecraftBlockRenderer.IsBannerItem(*resolvedModelName)) {
 		options.AdditionalScale *= 0.8
+	}
+
+	if len(compositeModelNames) > 1 {
+		if compositeRender := _minecraftBlockRenderer.TryRenderCompositeItemModels(normalizedItemKey, itemInfo, compositeModelNames, *options); compositeRender != nil {
+			return finalizeGuiResult(compositeRender)
+		}
 	}
 
 	if options.OverrideGuiTransform == nil && options.UseGuiTransform && model != nil {
@@ -190,24 +201,17 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderGuiItemInternal(ite
 	}
 
 	if model != nil && len(model.Elements) > 0 {
-		if _minecraftBlockRenderer.ShouldFallbackMissingCustomTexture(itemName, *options) && _minecraftBlockRenderer.ModelUsesMissingTexturePlaceholder(model) {
-			if fallback := _minecraftBlockRenderer.TryRenderCustomTextureFallback(itemName, *options, capture); fallback != nil {
-				return fallback
+		if !_minecraftBlockRenderer.ModelUsesMissingTexturePlaceholder(model) {
+			rendered := _minecraftBlockRenderer.RenderModel(model, *options, &itemName)
+			if rendered != nil {
+				return finalizeGuiResult(rendered)
 			}
-		}
-		rendered := _minecraftBlockRenderer.RenderModel(model, *options, &itemName)
-		if rendered != nil {
-			return finalizeGuiResult(rendered)
 		}
 	}
 
 	renderBlockEntityFallback := _minecraftBlockRenderer.TryRenderBlockEntityFallback(itemName, itemInfo, model, candidates, *options)
 	if renderBlockEntityFallback != nil {
 		return finalizeGuiResult(renderBlockEntityFallback)
-	}
-
-	if fallback := _minecraftBlockRenderer.TryRenderCustomTextureFallback(itemName, *options, capture); fallback != nil {
-		return fallback
 	}
 
 	return finalizeGuiResult(_minecraftBlockRenderer.RenderFallbackTexture(itemName, itemInfo, model, *options))
@@ -221,7 +225,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) DetermineDisplayContext(o
 	return "none"
 }
 
-func (_minecraftBlockRenderer *MinecraftBlockRenderer) ResolveItemModel(itemName string, itemInfo *data.ItemInfo, options BlockRenderOptions) (*data.BlockModelInstance, []string, *string) {
+func (_minecraftBlockRenderer *MinecraftBlockRenderer) ResolveItemModel(itemName string, itemInfo *data.ItemInfo, options BlockRenderOptions) (*data.BlockModelInstance, []string, *string, []string) {
 	displayContext := _minecraftBlockRenderer.DetermineDisplayContext(options)
 	var dynamicModel *string
 	var dynamicModels []string
@@ -282,8 +286,8 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) ResolveItemModel(itemName
 	}
 
 	appendCandidates(firmamentModel, false)
-	for _, modelName := range skyblockItemModels {
-		appendCandidates(&modelName, false)
+	if len(skyblockItemModels) > 0 {
+		appendCandidates(&skyblockItemModels[0], false)
 	}
 	for _, modelName := range dynamicModels {
 		appendCandidates(&modelName, false)
@@ -317,7 +321,101 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) ResolveItemModel(itemName
 		}
 	}
 
-	return model, candidates, resolvedModelName
+	compositeModelNames := _minecraftBlockRenderer.ResolveCompositeModelNames(resolvedModelName, skyblockItemModels, dynamicModels)
+	return model, candidates, resolvedModelName, compositeModelNames
+}
+
+func (_minecraftBlockRenderer *MinecraftBlockRenderer) ResolveCompositeModelNames(resolvedModelName *string, skyblockItemModels []string, dynamicModels []string) []string {
+	if len(skyblockItemModels) > 1 && _minecraftBlockRenderer.ContainsResolvedModel(skyblockItemModels, resolvedModelName) {
+		return skyblockItemModels
+	}
+	if len(dynamicModels) > 1 && _minecraftBlockRenderer.ContainsResolvedModel(dynamicModels, resolvedModelName) {
+		return dynamicModels
+	}
+	return nil
+}
+
+func (_minecraftBlockRenderer *MinecraftBlockRenderer) ContainsResolvedModel(modelNames []string, resolvedModelName *string) bool {
+	if resolvedModelName == nil || strings.TrimSpace(*resolvedModelName) == "" {
+		return false
+	}
+	normalizedResolved := _minecraftBlockRenderer.NormalizeModelIdentifier(*resolvedModelName)
+	for _, modelName := range modelNames {
+		if strings.EqualFold(_minecraftBlockRenderer.NormalizeModelIdentifier(modelName), normalizedResolved) {
+			return true
+		}
+	}
+	return false
+}
+
+func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryRenderCompositeItemModels(itemName string, itemInfo *data.ItemInfo, modelNames []string, options BlockRenderOptions) *image.RGBA {
+	if len(modelNames) <= 1 {
+		return nil
+	}
+
+	canvas := image.NewRGBA(image.Rect(0, 0, options.Size, options.Size))
+	renderedAny := false
+
+	for _, modelName := range modelNames {
+		if strings.TrimSpace(modelName) == "" {
+			continue
+		}
+
+		modelNameCopy := modelName
+		model := _minecraftBlockRenderer.ResolveModelOrNull(&modelNameCopy)
+		if model == nil {
+			continue
+		}
+
+		childOptions := options
+		if childOptions.OverrideGuiTransform == nil && childOptions.UseGuiTransform {
+			if guiOverride := model.GetDisplayTransform("gui"); guiOverride != nil {
+				childOptions.OverrideGuiTransform = guiOverride
+			}
+		}
+
+		modelCandidates := []string{modelName}
+		var layer *image.RGBA
+
+		if shouldPreferHead, preparedOptions := _minecraftBlockRenderer.ShouldPreferPlayerHeadRenderer(itemName, model, modelCandidates, childOptions); shouldPreferHead {
+			if headRender := _minecraftBlockRenderer.RenderPlayerHead(itemName, model, modelCandidates, *preparedOptions); headRender != nil {
+				layer = headRender
+			}
+		}
+
+		if layer == nil {
+			layer = _minecraftBlockRenderer.TryRenderGuiTextureLayers(itemName, itemInfo, model, childOptions)
+		}
+		if layer == nil {
+			layer = _minecraftBlockRenderer.TryRenderBedItem(itemName, model, childOptions)
+		}
+		if layer == nil && !_minecraftBlockRenderer.HasExplicitFlatHeadOverride(model, modelCandidates, childOptions) {
+			layer = _minecraftBlockRenderer.RenderPlayerHead(itemName, model, modelCandidates, childOptions)
+		}
+		if layer == nil && len(model.Elements) > 0 {
+			if !_minecraftBlockRenderer.ModelUsesMissingTexturePlaceholder(model) {
+				layer = _minecraftBlockRenderer.RenderModel(model, childOptions, &itemName)
+			}
+		}
+		if layer == nil {
+			layer = _minecraftBlockRenderer.TryRenderBlockEntityFallback(itemName, itemInfo, model, modelCandidates, childOptions)
+		}
+		if layer == nil {
+			layer = _minecraftBlockRenderer.RenderFallbackTexture(itemName, itemInfo, model, childOptions)
+		}
+		if layer == nil {
+			continue
+		}
+
+		imagedraw.Draw(canvas, canvas.Bounds(), layer, image.Point{}, imagedraw.Over)
+		renderedAny = true
+	}
+
+	if !renderedAny {
+		return nil
+	}
+
+	return canvas
 }
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) GetFirmamentModel(itemData *data.ItemRenderData) *string {
@@ -1483,28 +1581,16 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) IsGuiTexture(textureId st
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryRenderFlatItemFromIdentifiers(identifiers []string, model *data.BlockModelInstance, options BlockRenderOptions, tintContext string) *image.RGBA {
 	resolved := _minecraftBlockRenderer.ResolveTextureIdentifiers(identifiers, model)
 	var available []string
-	var missing []string
 
 	for _, textureId := range resolved {
 		texture := _minecraftBlockRenderer._textureRepository.GetTexture(textureId)
 		if texture != nil && !_minecraftBlockRenderer._textureRepository.IsMissingTexture(texture) {
 			available = append(available, textureId)
-		} else if texture != nil {
-			missing = append(missing, textureId)
 		}
 	}
 
 	if len(available) == 0 {
-		if len(missing) > 0 {
-			if _minecraftBlockRenderer.ShouldFallbackMissingCustomTexture(tintContext, options) {
-				fmt.Printf("warning: item %q could not resolve custom textures from candidates %v; falling back to %q\n", tintContext, missing, options.CustomTextureFallbackItem)
-				return nil
-			}
-			fmt.Printf("warning: item %q could not resolve any texture from candidates %v; using missing texture placeholder\n", tintContext, missing)
-			available = append(available, missing[0])
-		} else {
-			return nil
-		}
+		return nil
 	}
 
 	// fmt.Printf("\navailable: %v\noptions: %v\ntintContext: %v\n", available, options, tintContext)
@@ -1545,6 +1631,10 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) ResolveTextureIdentifiers
 }
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderFlatItem(layerTextureIds []string, options BlockRenderOptions, tintContext string) (image.RGBA, error) {
+	if len(layerTextureIds) == 0 {
+		return image.RGBA{}, fmt.Errorf("no texture layers resolved for item %q", tintContext)
+	}
+
 	canvas := image.NewRGBA(image.Rect(0, 0, options.Size, options.Size))
 	itemInfo := (*data.ItemInfo)(nil)
 	normalizedItemKey := (*string)(nil)
@@ -1585,6 +1675,9 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderFlatItem(layerTextu
 		skipContextTint := layerTint != nil || hasExplicitPerLayerTint || hasPrimaryExplicitTint
 		// fmt.Printf("ResolveItemLayerTexture: %v %v %v\n", textureId, tintContext, skipContextTint)
 		texture := _minecraftBlockRenderer.ResolveItemLayerTexture(textureId, tintContext, skipContextTint)
+		if texture == nil || _minecraftBlockRenderer._textureRepository.IsMissingTexture(texture) {
+			return image.RGBA{}, fmt.Errorf("texture %q could not be resolved for item %q", textureId, tintContext)
+		}
 
 		scale := math.Min(float64(options.Size)/float64(texture.Bounds().Dx()), float64(options.Size)/float64(texture.Bounds().Dy()))
 		// fmt.Printf("Scale: %f\n", scale)
@@ -1975,7 +2068,11 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryRenderBedItem(itemName
 	bedFoot := "bed/bed_foot"
 	footModel := _minecraftBlockRenderer.ResolveModelOrNull(&bedFoot)
 	if headModel == nil || footModel == nil {
-		return nil
+		rendered, err := _minecraftBlockRenderer.RenderFlatItem([]string{bedTextureId}, options, itemName)
+		if err != nil {
+			return nil
+		}
+		return &rendered
 	}
 
 	var elements []data.ModelElement
@@ -2359,6 +2456,50 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) CollectBillboardTextures(
 	return textures
 }
 
+func (_minecraftBlockRenderer *MinecraftBlockRenderer) CollectItemLayerTextures(model *data.BlockModelInstance, itemInfo *data.ItemInfo) []string {
+	var layers []string
+	seen := make(map[string]struct{})
+
+	tryAdd := func(candidate *string) {
+		if candidate == nil || strings.TrimSpace(*candidate) == "" {
+			return
+		}
+		key := strings.ToLower(strings.TrimSpace(*candidate))
+		if _, exists := seen[key]; exists {
+			return
+		}
+		seen[key] = struct{}{}
+		layers = append(layers, *candidate)
+	}
+
+	if model != nil {
+		var orderedLayers []struct {
+			Key   string
+			Value string
+		}
+		for key, value := range model.Textures {
+			if strings.HasPrefix(strings.ToLower(key), "layer") {
+				orderedLayers = append(orderedLayers, struct {
+					Key   string
+					Value string
+				}{Key: key, Value: value})
+			}
+		}
+		sort.SliceStable(orderedLayers, func(i, j int) bool {
+			return strings.Compare(strings.ToLower(orderedLayers[i].Key), strings.ToLower(orderedLayers[j].Key)) < 0
+		})
+		for _, layer := range orderedLayers {
+			tryAdd(&layer.Value)
+		}
+	}
+
+	if itemInfo != nil {
+		tryAdd(itemInfo.Texture)
+	}
+
+	return layers
+}
+
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryRenderBlockEntityFallback(itemName string, itemInfo *data.ItemInfo, model *data.BlockModelInstance, modelCandidates []string, options BlockRenderOptions) *image.RGBA {
 	blockOptions := options
 	if options.OverrideGuiTransform != nil && model != nil && len(model.Elements) == 0 {
@@ -2493,19 +2634,34 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryRenderBlockItem(blockN
 	}
 
 	rendered := _minecraftBlockRenderer.RenderBlock(blockName, options)
-	if rendered == nil {
+	if rendered == nil || !hasVisiblePixels(rendered) {
 		return nil
 	}
 
 	return rendered
 }
 
+func hasVisiblePixels(img *image.RGBA) bool {
+	if img == nil {
+		return false
+	}
+	bounds := img.Bounds()
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			if img.RGBAAt(x, y).A > 10 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderFallbackTexture(itemName string, itemInfo *data.ItemInfo, model *data.BlockModelInstance, options BlockRenderOptions) *image.RGBA {
-	if rendered := _minecraftBlockRenderer.TryRenderFlatItemFromIdentifiers(_minecraftBlockRenderer.CollectBillboardTextures(model, itemInfo), model, options, itemName); rendered != nil {
+	if rendered := _minecraftBlockRenderer.TryRenderFlatItemFromIdentifiers(_minecraftBlockRenderer.CollectItemLayerTextures(model, itemInfo), model, options, itemName); rendered != nil {
 		return rendered
 	}
 
-	if itemInfo != nil && strings.TrimSpace(*itemInfo.Texture) != "" {
+	if itemInfo != nil && itemInfo.Texture != nil && strings.TrimSpace(*itemInfo.Texture) != "" {
 		if rendered := _minecraftBlockRenderer.TryRenderEmbeddedTexture(*itemInfo.Texture, options, itemName); rendered != nil {
 			return rendered
 		}
@@ -2517,33 +2673,20 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderFallbackTexture(ite
 		}
 	}
 
-	fmt.Printf("warning: item %q is using missing texture placeholder\n", itemName)
-	rendered, err := _minecraftBlockRenderer.RenderFlatItem([]string{"minecraft:missingno"}, options, itemName)
-	if err != nil {
-		return nil
-	}
-
-	return &rendered
+	return nil
 }
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryRenderEmbeddedTexture(textureId string, options BlockRenderOptions, tintContext string) *image.RGBA {
 	texture := _minecraftBlockRenderer._textureRepository.GetTexture(textureId)
-	if texture != nil {
-		if _minecraftBlockRenderer._textureRepository.IsMissingTexture(texture) {
-			if _minecraftBlockRenderer.ShouldFallbackMissingCustomTexture(tintContext, options) {
-				fmt.Printf("warning: item %q could not resolve custom texture %q; falling back to %q\n", tintContext, textureId, options.CustomTextureFallbackItem)
-				return nil
-			}
-			fmt.Printf("warning: item %q could not resolve texture %q; using missing texture placeholder\n", tintContext, textureId)
-		}
-		rendered, err := _minecraftBlockRenderer.RenderFlatItem([]string{textureId}, options, tintContext)
-		if err != nil {
-			return nil
-		}
-		return &rendered
+	if texture == nil || _minecraftBlockRenderer._textureRepository.IsMissingTexture(texture) {
+		return nil
 	}
 
-	return nil
+	rendered, err := _minecraftBlockRenderer.RenderFlatItem([]string{textureId}, options, tintContext)
+	if err != nil {
+		return nil
+	}
+	return &rendered
 }
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) ShouldFallbackMissingCustomTexture(itemName string, options BlockRenderOptions) bool {
@@ -2642,6 +2785,9 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderGuiItemWithResource
 
 	// fmt.Printf("Rendering GUI item: %s with options: %+v %+v\n", itemName, forwardedOptions, capture)
 	image := rendered.RenderGuiItemInternal(itemName, &forwardedOptions, &capture)
+	if image == nil {
+		return nil
+	}
 	resourceTarget := strings.TrimSpace(itemName)
 	if strings.TrimSpace(capture.OriginalTarget) != "" {
 		resourceTarget = capture.OriginalTarget

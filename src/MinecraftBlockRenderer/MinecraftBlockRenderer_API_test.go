@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -154,6 +155,52 @@ func TestRenderFlatItemCompositesTransparentModelLayers(t *testing.T) {
 	}
 }
 
+func TestRenderCompositeItemSelectorDrawsAllModelLayers(t *testing.T) {
+	assetsRoot := createMinimalAssets(t)
+	compositeDefinition := `{"type":"composite","models":[
+		{"type":"model","model":"minecraft:item/composite_base"},
+		{"type":"model","model":"minecraft:item/composite_overlay"}
+	]}`
+	writeJSON(t, assetsRoot, "items/composite_weapon.json", compositeDefinition)
+	writeJSON(t, assetsRoot, "models/item/composite_base.json", `{"parent":"builtin/generated","textures":{"layer0":"minecraft:item/composite_base_layer"}}`)
+	writeJSON(t, assetsRoot, "models/item/composite_overlay.json", `{"parent":"builtin/generated","textures":{"layer0":"minecraft:item/composite_overlay_layer"}}`)
+	baseColor := color.RGBA{R: 210, G: 30, B: 40, A: 255}
+	overlayColor := color.RGBA{R: 30, G: 220, B: 70, A: 255}
+	writePNG(t, filepath.Join(assetsRoot, "textures", "item", "composite_base_layer.png"), 16, 16, baseColor)
+	writeCenterPatchPNG(t, filepath.Join(assetsRoot, "textures", "item", "composite_overlay_layer.png"), 16, 16, overlayColor)
+
+	renderer, err := CreateFromDataDirectory(assetsRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	itemInfo := renderer._itemRegistry.GetItemInfo("composite_weapon")
+	if itemInfo == nil || itemInfo.Selector == nil {
+		t.Fatalf("composite_weapon item selector did not load: %#v", itemInfo)
+	}
+	model, _, resolvedModelName, compositeModelNames := renderer.ResolveItemModel("composite_weapon", itemInfo, MergeBlockRenderOptions(&BlockRenderOptions{Size: 32}))
+	if model == nil || resolvedModelName == nil || len(compositeModelNames) != 2 {
+		t.Fatalf("resolved model=%#v resolved=%v composite=%v", model, resolvedModelName, compositeModelNames)
+	}
+
+	rendered := renderer.RenderGuiItemWithResourceId("composite_weapon", &BlockRenderOptions{Size: 32})
+	if rendered == nil || rendered.Image == nil {
+		t.Fatal("rendered image is nil")
+	}
+	if !imageContainsApproxColor(rendered.Image, baseColor, 8) {
+		t.Fatalf("composite render does not contain base color; resource=%+v", rendered.ResourceId)
+	}
+	if !imageContainsApproxColor(rendered.Image, overlayColor, 8) {
+		t.Fatalf("composite render does not contain overlay color; resource=%+v", rendered.ResourceId)
+	}
+	if rendered.ResourceId.Model == nil || !strings.HasPrefix(*rendered.ResourceId.Model, "composite:") {
+		t.Fatalf("resource model = %v, want composite model", rendered.ResourceId.Model)
+	}
+	if !contains(rendered.ResourceId.Textures, "minecraft:item/composite_base_layer") ||
+		!contains(rendered.ResourceId.Textures, "minecraft:item/composite_overlay_layer") {
+		t.Fatalf("resource textures = %v, want both composite textures", rendered.ResourceId.Textures)
+	}
+}
+
 func TestMinecraftAtlasGeneratorOrderingAndEntryErrors(t *testing.T) {
 	renderer, err := CreateFromDataDirectory(createMinimalAssets(t))
 	if err != nil {
@@ -249,6 +296,27 @@ func writeTransparentPNG(t *testing.T, path string, width int, height int) {
 		t.Fatal(err)
 	}
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if err := png.Encode(file, img); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeCenterPatchPNG(t *testing.T, path string, width int, height int, c color.RGBA) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := height / 4; y < height*3/4; y++ {
+		for x := width / 4; x < width*3/4; x++ {
+			img.SetRGBA(x, y, c)
+		}
+	}
 	file, err := os.Create(path)
 	if err != nil {
 		t.Fatal(err)

@@ -32,7 +32,10 @@ func TestItemRegistryIncludesBlockInventoryItems(t *testing.T) {
 			t.Fatalf("known items missing %q", want)
 		}
 		rendered := renderer.RenderGuiItemWithResourceId(want, &BlockRenderOptions{Size: 64})
-		if rendered == nil || !hasOpaquePixels(rendered.Image) {
+		if rendered == nil {
+			t.Fatalf("%s item render returned nil", want)
+		}
+		if !hasOpaquePixels(rendered.Image) {
 			t.Fatalf("%s item render did not contain opaque pixels", want)
 		}
 	}
@@ -41,7 +44,10 @@ func TestItemRegistryIncludesBlockInventoryItems(t *testing.T) {
 func TestRenderBedItemUsesBlockModelFallback(t *testing.T) {
 	renderer := CreateFromMinecraftAssets(requireFullAssets(t), nil, nil)
 	rendered := renderer.RenderGuiItemWithResourceId("white_bed", &BlockRenderOptions{Size: 96})
-	if rendered == nil || !hasOpaquePixels(rendered.Image) {
+	if rendered == nil {
+		t.Fatal("white bed render returned nil")
+	}
+	if !hasOpaquePixels(rendered.Image) {
 		t.Fatal("white bed render did not contain opaque pixels")
 	}
 	minX, maxX, _, _, ok := opaqueBounds(rendered.Image)

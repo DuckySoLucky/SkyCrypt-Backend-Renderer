@@ -166,6 +166,10 @@ func (renderer *MinecraftBlockRenderer) RenderGuiItemFromTextureId(textureId str
 		return rendered.Image, nil
 	}
 	rendererForOptions, forwarded := renderer.ResolveRendererForOptions(effective)
+	texture := rendererForOptions._textureRepository.GetTexture(textureId)
+	if texture == nil || rendererForOptions._textureRepository.IsMissingTexture(texture) {
+		return nil, fmt.Errorf("texture %q could not be resolved", textureId)
+	}
 	rendered, err := rendererForOptions.RenderFlatItem([]string{textureId}, forwarded, textureId)
 	if err != nil {
 		return nil, err

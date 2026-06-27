@@ -171,6 +171,34 @@ func averageColor(img *image.RGBA) color.RGBA {
 	return color.RGBA{R: uint8(r / count), G: uint8(g / count), B: uint8(b / count), A: uint8(a / count)}
 }
 
+func imageContainsApproxColor(img *image.RGBA, expected color.RGBA, tolerance uint8) bool {
+	if img == nil {
+		return false
+	}
+	bounds := img.Bounds()
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			p := img.RGBAAt(x, y)
+			if p.A <= 10 {
+				continue
+			}
+			if channelWithinTolerance(p.R, expected.R, tolerance) &&
+				channelWithinTolerance(p.G, expected.G, tolerance) &&
+				channelWithinTolerance(p.B, expected.B, tolerance) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func channelWithinTolerance(actual uint8, expected uint8, tolerance uint8) bool {
+	if actual > expected {
+		return actual-expected <= tolerance
+	}
+	return expected-actual <= tolerance
+}
+
 func lowerHalfLuminanceBySide(img *image.RGBA) (left, right uint64) {
 	if img == nil {
 		return 0, 0
