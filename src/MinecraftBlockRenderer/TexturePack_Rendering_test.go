@@ -118,6 +118,64 @@ func TestVanillaSkyBlockItemIDWithoutPackOverrideRendersVanilla(t *testing.T) {
 	}
 }
 
+func TestNBTItemModelSelectorTakesPriorityOverFirmamentFallback(t *testing.T) {
+	assetsRoot := createMinimalAssets(t)
+	packRoot := createEmptyPack(t, "testpack")
+	writeJSON(t, packRoot, "assets/skyblock/items/selector_3d.json", `{"model":{"type":"select","property":"component","component":"item_model","cases":[
+		{"when":"minecraft:diamond_sword","model":{"type":"model","model":"firmskyblock:item/selector_3d_inventory"}}
+	]}}`)
+	writeJSON(t, packRoot, "assets/firmskyblock/models/item/selector_3d.json", `{
+		"textures":{"all":"firmskyblock:item/selector_3d_wrong"},
+		"elements":[{"from":[2,2,2],"to":[14,14,14],"faces":{
+			"north":{"texture":"#all"},"south":{"texture":"#all"},"east":{"texture":"#all"},
+			"west":{"texture":"#all"},"up":{"texture":"#all"},"down":{"texture":"#all"}
+		}}],
+		"display":{"gui":{"rotation":[0,0,0],"scale":[1,1,1]}}
+	}`)
+	writeJSON(t, packRoot, "assets/firmskyblock/models/item/selector_3d_inventory.json", `{
+		"textures":{"all":"firmskyblock:item/selector_3d_inventory"},
+		"elements":[{"from":[2,2,2],"to":[14,14,14],"faces":{
+			"north":{"texture":"#all"},"south":{"texture":"#all"},"east":{"texture":"#all"},
+			"west":{"texture":"#all"},"up":{"texture":"#all"},"down":{"texture":"#all"}
+		}}],
+		"display":{"gui":{"rotation":[30,225,0],"scale":[0.8,0.8,0.8]}}
+	}`)
+	writePNG(t, filepath.Join(packRoot, "assets", "firmskyblock", "textures", "item", "selector_3d_wrong.png"), 16, 16, color.RGBA{R: 220, G: 30, B: 30, A: 255})
+	writePNG(t, filepath.Join(packRoot, "assets", "firmskyblock", "textures", "item", "selector_3d_inventory.png"), 16, 16, color.RGBA{R: 30, G: 220, B: 80, A: 255})
+
+	registry := texturepacks.NewTexturePackRegistry()
+	if _, err := registry.RegisterPack(packRoot); err != nil {
+		t.Fatal(err)
+	}
+	renderer := CreateFromMinecraftAssets(assetsRoot, registry, nil)
+
+	rendered, err := renderer.RenderItemNBT(map[string]any{
+		"id":      "minecraft:diamond_sword",
+		"item_id": "minecraft:diamond_sword",
+		"tag": map[string]any{
+			"ExtraAttributes": map[string]any{
+				"id": "SELECTOR_3D",
+			},
+		},
+	}, &BlockRenderOptions{Size: 48, PackIds: []string{"testpack"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rendered == nil || !hasOpaquePixels(rendered.Image) {
+		t.Fatal("NBT selector 3D render did not produce visible pixels")
+	}
+	model := ""
+	if rendered.ResourceId.Model != nil {
+		model = *rendered.ResourceId.Model
+	}
+	if !strings.Contains(strings.ToLower(model), "selector_3d_inventory") {
+		t.Fatalf("resource model = %q, want inventory selector model; textures=%v", model, rendered.ResourceId.Textures)
+	}
+	if !imageContainsApproxColor(rendered.Image, color.RGBA{R: 30, G: 220, B: 80, A: 255}, 20) {
+		t.Fatalf("NBT selector render did not use inventory texture; resource=%+v", rendered.ResourceId)
+	}
+}
+
 func TestMissingSkyBlockCustomSkullReturnsError(t *testing.T) {
 	assetsRoot := createMinimalAssets(t)
 	packRoot := createEmptyPack(t, "emptypack")

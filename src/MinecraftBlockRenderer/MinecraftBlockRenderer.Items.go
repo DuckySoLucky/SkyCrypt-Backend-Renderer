@@ -286,9 +286,15 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) ResolveItemModel(itemName
 		}
 	}
 
-	appendCandidates(firmamentModel, false)
-	if len(skyblockItemModels) > 0 {
+	preferSkyBlockSelectorModel := hasExplicitSelectorItemModel(options.ItemData) && len(skyblockItemModels) > 0
+	if preferSkyBlockSelectorModel {
 		appendCandidates(&skyblockItemModels[0], false)
+		appendCandidates(firmamentModel, false)
+	} else {
+		appendCandidates(firmamentModel, false)
+		if len(skyblockItemModels) > 0 {
+			appendCandidates(&skyblockItemModels[0], false)
+		}
 	}
 	for _, modelName := range dynamicModels {
 		appendCandidates(&modelName, false)
@@ -552,6 +558,10 @@ func itemModelForSelectorContext(itemData *data.ItemRenderData) string {
 		return ""
 	}
 	return strings.TrimSpace(itemData.ItemModel)
+}
+
+func hasExplicitSelectorItemModel(itemData *data.ItemRenderData) bool {
+	return strings.TrimSpace(itemModelForSelectorContext(itemData)) != ""
 }
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) ResolveSkyblockItemModelFromPackProviders(encodedId string, itemName string, itemData *data.ItemRenderData, displayContext string) *string {
