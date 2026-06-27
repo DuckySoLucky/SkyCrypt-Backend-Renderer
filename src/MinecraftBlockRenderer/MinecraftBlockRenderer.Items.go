@@ -215,17 +215,21 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) DetermineDisplayContext(o
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) ResolveItemModel(itemName string, itemInfo *data.ItemInfo, options BlockRenderOptions) (*data.BlockModelInstance, []string, *string) {
 	displayContext := _minecraftBlockRenderer.DetermineDisplayContext(options)
 	var dynamicModel *string
+	var dynamicModels []string
 	if itemInfo != nil && itemInfo.Selector != nil {
 		selectorContext := data.ItemModelContext{
 			ItemData:       options.ItemData,
 			DisplayContext: displayContext,
 			ItemName:       itemName,
 		}
-		dynamicModel = itemInfo.Selector.Resolve(selectorContext)
+		dynamicModels = compactModelNames(data.ResolveAllItemModelSelector(itemInfo.Selector, selectorContext))
+		if len(dynamicModels) > 0 {
+			dynamicModel = &dynamicModels[0]
+		}
 	}
 
 	firmamentModel := _minecraftBlockRenderer.GetFirmamentModel(options.ItemData)
-	skyblockItemModel := _minecraftBlockRenderer.GetSkyblockItemModel(itemName, options.ItemData, displayContext)
+	skyblockItemModels := _minecraftBlockRenderer.GetSkyblockItemModels(itemName, options.ItemData, displayContext)
 
 	var primaryModel *string
 	if itemInfo != nil {
@@ -269,8 +273,12 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) ResolveItemModel(itemName
 	}
 
 	appendCandidates(firmamentModel, false)
-	appendCandidates(skyblockItemModel, false)
-	appendCandidates(dynamicModel, false)
+	for _, modelName := range skyblockItemModels {
+		appendCandidates(&modelName, false)
+	}
+	for _, modelName := range dynamicModels {
+		appendCandidates(&modelName, false)
+	}
 	appendCandidates(primaryModel, true)
 	appendCandidates(&fallbackModel, true)
 	appendCandidates(&itemName, true)
@@ -351,7 +359,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) isValidResourceLocationCh
 		c == '/'
 }
 
-func (_minecraftBlockRenderer *MinecraftBlockRenderer) GetSkyblockItemModel(itemName string, itemData *data.ItemRenderData, displayContext string) *string {
+func (_minecraftBlockRenderer *MinecraftBlockRenderer) GetSkyblockItemModels(itemName string, itemData *data.ItemRenderData, displayContext string) []string {
 	if itemData == nil || itemData.CustomData == nil {
 		return nil
 	}
@@ -361,7 +369,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) GetSkyblockItemModel(item
 			encodedId := _minecraftBlockRenderer.EncodeFirmamentId(rawSkyblockId)
 			info := _minecraftBlockRenderer._itemRegistry.GetItemInfo(encodedId)
 			if info != nil {
-				var model *string
+				var models []string
 
 				if info.Selector != nil {
 					selectorContext := data.ItemModelContext{
@@ -369,25 +377,54 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) GetSkyblockItemModel(item
 						DisplayContext: displayContext,
 						ItemName:       itemName,
 					}
-					model = info.Selector.Resolve(selectorContext)
+					models = data.ResolveAllItemModelSelector(info.Selector, selectorContext)
 				}
 
-				if (model == nil || strings.TrimSpace(*model) == "" || !strings.Contains(*model, ":")) && info.Model != nil && strings.Contains(*info.Model, ":") {
-					return info.Model
+				if len(models) == 0 && info.Model != nil {
+					models = append(models, *info.Model)
 				}
 
-				if model != nil && strings.Contains(*model, ":") {
-					return model
+				filtered := filterNamespacedModels(models)
+				if len(filtered) == 0 && info.Model != nil && strings.Contains(*info.Model, ":") {
+					return filterNamespacedModels([]string{*info.Model})
+				}
+				if len(filtered) > 0 {
+					return filtered
 				}
 			}
 
-			if model := _minecraftBlockRenderer.ResolveSkyblockItemModelFromPackProviders(encodedId, itemName, itemData, displayContext); model != nil {
-				return model
+			if models := _minecraftBlockRenderer.ResolveSkyblockItemModelsFromPackProviders(encodedId, itemName, itemData, displayContext); len(models) > 0 {
+				return models
 			}
 		}
 	}
 
 	return nil
+}
+
+func filterNamespacedModels(models []string) []string {
+	return filterModelNames(models, true)
+}
+
+func compactModelNames(models []string) []string {
+	return filterModelNames(models, false)
+}
+
+func filterModelNames(models []string, requireNamespace bool) []string {
+	var filtered []string
+	seen := make(map[string]struct{})
+	for _, model := range models {
+		if strings.TrimSpace(model) == "" || (requireNamespace && !strings.Contains(model, ":")) {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(model))
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		filtered = append(filtered, model)
+	}
+	return filtered
 }
 
 func nbtStringFromTag(tag nbt.NbtTag) (string, bool) {
@@ -402,6 +439,14 @@ func nbtStringFromTag(tag nbt.NbtTag) (string, bool) {
 }
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) ResolveSkyblockItemModelFromPackProviders(encodedId string, itemName string, itemData *data.ItemRenderData, displayContext string) *string {
+	models := _minecraftBlockRenderer.ResolveSkyblockItemModelsFromPackProviders(encodedId, itemName, itemData, displayContext)
+	if len(models) == 0 {
+		return nil
+	}
+	return &models[0]
+}
+
+func (_minecraftBlockRenderer *MinecraftBlockRenderer) ResolveSkyblockItemModelsFromPackProviders(encodedId string, itemName string, itemData *data.ItemRenderData, displayContext string) []string {
 	if strings.TrimSpace(encodedId) == "" {
 		return nil
 	}
@@ -413,19 +458,22 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) ResolveSkyblockItemModelF
 	}
 
 	if entry.Selector != nil {
-		resolved := entry.Selector.Resolve(data.ItemModelContext{
+		resolved := data.ResolveAllItemModelSelector(entry.Selector, data.ItemModelContext{
 			ItemData:       itemData,
 			DisplayContext: displayContext,
 			ItemName:       itemName,
 		})
-		if resolved != nil && strings.TrimSpace(*resolved) != "" {
-			return resolved
+		if len(resolved) > 0 {
+			filtered := filterNamespacedModels(resolved)
+			if len(filtered) > 0 {
+				return filtered
+			}
 		}
 	}
 
 	if strings.TrimSpace(entry.ModelReference) != "" {
 		modelReference := entry.ModelReference
-		return &modelReference
+		return filterNamespacedModels([]string{modelReference})
 	}
 
 	return nil

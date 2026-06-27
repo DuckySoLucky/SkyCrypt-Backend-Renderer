@@ -91,6 +91,55 @@ func TestCatharsisNumericDataTypeSupportsMidasPaidValue(t *testing.T) {
 	}
 }
 
+func TestResolveAllFallsBackToSingularSelectResolution(t *testing.T) {
+	selector := mustParseSelector(t, `{
+		"model": {
+			"type": "select",
+			"property": "display_context",
+			"cases": [
+				{"when": "ignored", "model": {"type": "model", "model": "minecraft:item/ignored"}}
+			],
+			"fallback": {
+				"type": "range_dispatch",
+				"property": "catharsis:data_type",
+				"data_type": "midas_weapon_paid",
+				"entries": [
+					{"threshold": 0, "model": {"type": "model", "model": "item_melee:item/midas_sword_0"}}
+				]
+			}
+		}
+	}`)
+
+	resolved := ResolveAllItemModelSelector(selector, ItemModelContext{ItemName: "golden_sword", DisplayContext: "gui"})
+	if len(resolved) != 1 || resolved[0] != "item_melee:item/midas_sword_0" {
+		t.Fatalf("resolved = %v, want midas fallback model", resolved)
+	}
+}
+
+func TestResolveAllCompositePreservesAllModels(t *testing.T) {
+	selector := mustParseSelector(t, `{
+		"model": {
+			"type": "composite",
+			"models": [
+				{"type": "model", "model": "minecraft:item/base"},
+				{"type": "model", "model": "minecraft:item/overlay"},
+				{"type": "model", "model": "minecraft:item/base"}
+			]
+		}
+	}`)
+
+	resolved := ResolveAllItemModelSelector(selector, ItemModelContext{ItemName: "layered", DisplayContext: "gui"})
+	want := []string{"minecraft:item/base", "minecraft:item/overlay"}
+	if len(resolved) != len(want) {
+		t.Fatalf("resolved = %v, want %v", resolved, want)
+	}
+	for i := range want {
+		if resolved[i] != want[i] {
+			t.Fatalf("resolved = %v, want %v", resolved, want)
+		}
+	}
+}
+
 func TestComponentConditionMatchesNestedCustomData(t *testing.T) {
 	selector := mustParseSelector(t, `{
 		"model": {

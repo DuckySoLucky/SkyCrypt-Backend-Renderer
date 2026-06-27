@@ -32,6 +32,114 @@ type ItemModelSelector interface {
 	Resolve(context ItemModelContext) *string
 }
 
+func ResolveAllItemModelSelector(selector ItemModelSelector, context ItemModelContext) []string {
+	if selector == nil {
+		return nil
+	}
+
+	switch typed := selector.(type) {
+	case *ItemModelSelectorModel:
+		return oneResolvedModel(typed.Resolve(context))
+	case *ItemModelSelectorSpecial:
+		if nested := ResolveAllItemModelSelector(typed.Nested, context); len(nested) > 0 {
+			return nested
+		}
+		return oneResolvedModel(typed.BaseModel)
+	case *ItemModelSelectorComposite:
+		var models []string
+		seen := make(map[string]struct{})
+		for _, child := range typed.Selectors {
+			for _, resolved := range ResolveAllItemModelSelector(child, context) {
+				if strings.TrimSpace(resolved) == "" {
+					continue
+				}
+				key := strings.ToLower(strings.TrimSpace(resolved))
+				if _, exists := seen[key]; exists {
+					continue
+				}
+				seen[key] = struct{}{}
+				models = append(models, resolved)
+			}
+		}
+		return models
+	case *ItemModelSelectorCondition:
+		if typed.evaluateCondition(context) {
+			return ResolveAllItemModelSelector(typed.OnTrue, context)
+		}
+		return ResolveAllItemModelSelector(typed.OnFalse, context)
+	case *ItemModelSelectorSelect:
+		var result []string
+		for _, selectCase := range typed.Cases {
+			if typed.matches(selectCase.When, context) {
+				if resolved := ResolveAllItemModelSelector(selectCase.Selector, context); len(resolved) > 0 {
+					result = resolved
+					break
+				}
+			}
+		}
+		if len(result) == 0 && typed.shouldResolveFirstCaseOnUnsupportedSelector() {
+			if len(typed.Cases) > 0 {
+				if resolved := ResolveAllItemModelSelector(typed.Cases[0].Selector, context); len(resolved) > 0 {
+					result = resolved
+				}
+			}
+		}
+		if len(result) == 0 {
+			result = ResolveAllItemModelSelector(typed.Fallback, context)
+		}
+		if len(result) == 0 {
+			return oneResolvedModel(typed.Resolve(context))
+		}
+		return result
+	case *ItemModelSelectorRangeDispatch:
+		value := typed.getPropertyValue(context)
+		var result []string
+		if value == nil {
+			if typed.shouldResolveFirstEntryOnUnsupportedSelector() && len(typed.Entries) > 0 {
+				if resolved := ResolveAllItemModelSelector(typed.Entries[0].Selector, context); len(resolved) > 0 {
+					result = resolved
+				}
+			}
+			if len(result) == 0 {
+				result = ResolveAllItemModelSelector(typed.Fallback, context)
+			}
+		} else {
+			var matchedEntry *RangeDispatchEntry
+			for index := range typed.Entries {
+				entry := &typed.Entries[index]
+				if *value >= entry.Threshold {
+					if matchedEntry == nil || entry.Threshold > matchedEntry.Threshold {
+						matchedEntry = entry
+					}
+				}
+			}
+			if matchedEntry != nil {
+				if resolved := ResolveAllItemModelSelector(matchedEntry.Selector, context); len(resolved) > 0 {
+					result = resolved
+				}
+			}
+			if len(result) == 0 {
+				result = ResolveAllItemModelSelector(typed.Fallback, context)
+			}
+		}
+		if len(result) == 0 {
+			return oneResolvedModel(typed.Resolve(context))
+		}
+		return result
+	case *ItemModelSelectorOptimized:
+		return typed.resolveAll(context)
+	default:
+		return oneResolvedModel(selector.Resolve(context))
+	}
+}
+
+func oneResolvedModel(model *string) []string {
+	if model == nil || strings.TrimSpace(*model) == "" {
+		return nil
+	}
+	return []string{*model}
+}
+
 type catharsisDataTypeResolver struct{}
 
 func (catharsisDataTypeResolver) SupportsSelectValue(dataType string) bool {
@@ -190,6 +298,18 @@ func (s *ItemModelSelectorSpecial) Resolve(context ItemModelContext) *string {
 		}
 	}
 	return s.BaseModel
+}
+
+type ItemModelSelectorComposite struct {
+	Selectors []ItemModelSelector
+}
+
+func (s *ItemModelSelectorComposite) Resolve(context ItemModelContext) *string {
+	resolved := ResolveAllItemModelSelector(s, context)
+	if len(resolved) == 0 {
+		return nil
+	}
+	return &resolved[0]
 }
 
 type ItemModelSelectorCondition struct {
@@ -754,6 +874,19 @@ func (s *ItemModelSelectorOptimized) Resolve(context ItemModelContext) *string {
 		return nil
 	}
 
+	resolved := s.resolveAll(context)
+	if len(resolved) > 0 {
+		return &resolved[0]
+	}
+
+	return nil
+}
+
+func (s *ItemModelSelectorOptimized) resolveAll(context ItemModelContext) []string {
+	if s == nil {
+		return nil
+	}
+
 	if context.ItemData != nil && context.ItemData.CustomData != nil {
 		customData := context.ItemData.CustomData
 		customDataKey := ""
@@ -766,11 +899,11 @@ func (s *ItemModelSelectorOptimized) Resolve(context ItemModelContext) *string {
 
 		if customDataKey != "" {
 			if model, ok := s.customDataIDToModel[customDataKey]; ok {
-				return &model
+				return oneResolvedModel(&model)
 			}
 
 			if selector, ok := s.customDataIDToSelector[customDataKey]; ok && selector != nil {
-				return selector.Resolve(context)
+				return ResolveAllItemModelSelector(selector, context)
 			}
 		}
 	}
@@ -783,11 +916,11 @@ func (s *ItemModelSelectorOptimized) Resolve(context ItemModelContext) *string {
 			}
 
 			if mapping.Selector != nil {
-				return mapping.Selector.Resolve(context)
+				return ResolveAllItemModelSelector(mapping.Selector, context)
 			}
 
 			if mapping.Model != nil && strings.TrimSpace(*mapping.Model) != "" {
-				return mapping.Model
+				return oneResolvedModel(mapping.Model)
 			}
 		}
 	}
@@ -796,7 +929,7 @@ func (s *ItemModelSelectorOptimized) Resolve(context ItemModelContext) *string {
 		return nil
 	}
 
-	return s.fallbackSelector.Resolve(context)
+	return ResolveAllItemModelSelector(s.fallbackSelector, context)
 }
 
 func (s *ItemModelSelectorOptimized) CustomDataMappingCount() int {
@@ -1251,14 +1384,18 @@ func parseComposite(element map[string]any, depth int) ItemModelSelector {
 		return nil
 	}
 
+	selectors := make([]ItemModelSelector, 0, len(modelsArray))
 	for _, modelElement := range modelsArray {
 		parsed := parseItemModelSelector(modelElement, depth)
 		if parsed != nil {
-			return parsed
+			selectors = append(selectors, parsed)
 		}
 	}
 
-	return nil
+	if len(selectors) == 0 {
+		return nil
+	}
+	return &ItemModelSelectorComposite{Selectors: selectors}
 }
 
 func parseSelect(element map[string]any, depth int) ItemModelSelector {
