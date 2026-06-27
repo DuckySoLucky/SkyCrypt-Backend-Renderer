@@ -195,10 +195,16 @@ func AddOverlayNamespaces(registry *assets.AssetNamespaceRegistry, overlay Overl
 			for _, file := range files {
 				if file.IsDir() {
 					namespaceName := file.Name()
-					registry.AddNamespace(namespaceName, filepath.Join(assetsDirectory, namespaceName), overlay.SourceId, overlay.Kind == "vanilla")
+					RegisterNamespaceRoot(registry, namespaceName, filepath.Join(assetsDirectory, namespaceName), overlay.SourceId, overlay.Kind == "vanilla")
 				}
 			}
 		}
+		return
+	}
+
+	if strings.EqualFold(filepath.Base(filepath.Dir(normalized)), "assets") {
+		namespaceName := filepath.Base(normalized)
+		RegisterNamespaceRoot(registry, namespaceName, normalized, overlay.SourceId, overlay.Kind == "vanilla")
 		return
 	}
 

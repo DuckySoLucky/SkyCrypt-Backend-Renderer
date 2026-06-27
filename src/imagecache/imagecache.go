@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"image"
 	"image/draw"
-	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +13,7 @@ import (
 	"github.com/HugoSmits86/nativewebp"
 )
 
-const CacheFormatVersion = "7"
+const CacheFormatVersion = "8"
 
 func WriteWebPAtomic(targetPath string, img image.Image) error {
 	if img == nil {
@@ -25,15 +24,6 @@ func WriteWebPAtomic(targetPath string, img image.Image) error {
 		return nativewebp.Encode(file, encodedImage, &nativewebp.Options{
 			CompressionLevel: nativewebp.DefaultCompression,
 		})
-	})
-}
-
-func WritePNGAtomic(targetPath string, img image.Image) error {
-	if img == nil {
-		return fmt.Errorf("image is nil")
-	}
-	return writeAtomic(targetPath, func(file *os.File) error {
-		return png.Encode(file, img)
 	})
 }
 

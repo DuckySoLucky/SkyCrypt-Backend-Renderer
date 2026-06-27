@@ -170,7 +170,6 @@ func TestRenderItemNBTSkyBlockPackIgnoresVanillaDisplayTint(t *testing.T) {
 	}
 	assertRenderedItem(t, renderer, item, sourcePackID(expectedResource))
 	assertCachedWebPHasNonBlackOpaqueColor(t, item.Path)
-	assertPNGHasNonBlackOpaqueColor(t, renderedPNGPathFromWebP(item.Path))
 }
 
 func TestRenderItemNBTVanillaIgnoresDisplayTintOnNonTintableItem(t *testing.T) {
@@ -189,7 +188,6 @@ func TestRenderItemNBTVanillaIgnoresDisplayTintOnNonTintableItem(t *testing.T) {
 	}
 	assertRenderedItem(t, renderer, item, mbr.VanillaPackId)
 	assertCachedWebPHasColor(t, item.Path, color.NRGBA{R: 40, G: 180, B: 220, A: 255})
-	assertPNGHasNonBlackOpaqueColor(t, renderedPNGPathFromWebP(item.Path))
 }
 
 func TestRenderItemNBTVanillaBrewingStandIgnoresDisplayTint(t *testing.T) {
@@ -208,7 +206,6 @@ func TestRenderItemNBTVanillaBrewingStandIgnoresDisplayTint(t *testing.T) {
 	}
 	assertRenderedItem(t, renderer, item, mbr.VanillaPackId)
 	assertCachedWebPHasColor(t, item.Path, color.NRGBA{R: 155, G: 94, B: 38, A: 255})
-	assertPNGHasNonBlackOpaqueColor(t, renderedPNGPathFromWebP(item.Path))
 }
 
 func TestRenderItemNBTWebPKeepsVanillaTextureColors(t *testing.T) {
@@ -306,7 +303,6 @@ func TestRenderItemNBTActualVanillaBrewingStandHasColor(t *testing.T) {
 	}
 
 	assertCachedWebPHasNonBlackOpaqueColor(t, item.Path)
-	assertPNGHasNonBlackOpaqueColor(t, renderedPNGPathFromWebP(item.Path))
 }
 
 func TestRenderItemNBTRealPackWebPMatchesPrerender(t *testing.T) {
@@ -759,7 +755,6 @@ func assertRenderedItem(t testing.TB, renderer *Renderer, item *RenderedItem, te
 	}
 	assertRenderedPath(t, renderer, item.Path)
 	assertWebPFile(t, item.Path)
-	assertPNGFile(t, renderedPNGPathFromWebP(item.Path))
 }
 
 func assertRenderedPath(t testing.TB, renderer *Renderer, path string) {
@@ -781,17 +776,6 @@ func assertWebPFile(t testing.TB, path string) {
 	}
 	if len(data) < 12 || string(data[:4]) != "RIFF" || string(data[8:12]) != "WEBP" {
 		t.Fatalf("file is not a webp: %s", path)
-	}
-}
-
-func assertPNGFile(t testing.TB, path string) {
-	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(data) < 8 || string(data[:8]) != "\x89PNG\r\n\x1a\n" {
-		t.Fatalf("file is not a png: %s", path)
 	}
 }
 

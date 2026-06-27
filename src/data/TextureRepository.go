@@ -256,7 +256,7 @@ func (_textureRepository *TextureRepository) LoadTextureInternal(normalizedTextu
 		return generated
 	}
 
-	// fmt.Printf("Failed to load texture for %s, returning missing texture\n", normalizedTextureId)
+	// Missing textures are logged by render call sites so speculative lookups do not spam warnings.
 	return _textureRepository._missingTexture
 }
 
@@ -1151,6 +1151,10 @@ func sameRGBA(a, b image.RGBA) bool {
 	return a.Stride == b.Stride &&
 		a.Rect == b.Rect &&
 		bytes.Equal(a.Pix, b.Pix)
+}
+
+func (_textureRepository *TextureRepository) IsMissingTexture(img *image.RGBA) bool {
+	return img == nil || sameRGBA(*img, _textureRepository._missingTexture)
 }
 
 func (_textureRepository *TextureRepository) GetTintedTexture(textureId string, tint color.RGBA, strengthMultiplier float64, blend float64) *image.RGBA {

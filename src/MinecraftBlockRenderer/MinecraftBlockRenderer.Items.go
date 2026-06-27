@@ -1350,15 +1350,18 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryRenderGuiTextureLayers
 
 	if !hasModelLayer {
 		normalized := _minecraftBlockRenderer.NormalizeItemTextureKey(itemName)
-		// pro dev
-		first := fmt.Sprintf("minecraft:item/%s", normalized)
-		tryAdd(&first, false, false)
-		second := fmt.Sprintf("minecraft:item/%s_overlay", normalized)
-		tryAdd(&second, false, false)
-		third := fmt.Sprintf("item/%s", normalized)
-		tryAdd(&third, false, false)
-		fourth := fmt.Sprintf("textures/item/%s", normalized)
-		tryAdd(&fourth, false, false)
+		if strings.Contains(normalized, ":") {
+			tryAdd(&normalized, false, false)
+		} else {
+			first := fmt.Sprintf("minecraft:item/%s", normalized)
+			tryAdd(&first, false, false)
+			second := fmt.Sprintf("minecraft:item/%s_overlay", normalized)
+			tryAdd(&second, false, false)
+			third := fmt.Sprintf("item/%s", normalized)
+			tryAdd(&third, false, false)
+			fourth := fmt.Sprintf("textures/item/%s", normalized)
+			tryAdd(&fourth, false, false)
+		}
 	}
 
 	if model != nil && len(model.Elements) > 0 {
@@ -1421,16 +1424,24 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) IsGuiTexture(textureId st
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryRenderFlatItemFromIdentifiers(identifiers []string, model *data.BlockModelInstance, options BlockRenderOptions, tintContext string) *image.RGBA {
 	resolved := _minecraftBlockRenderer.ResolveTextureIdentifiers(identifiers, model)
 	var available []string
+	var missing []string
 
 	for _, textureId := range resolved {
 		texture := _minecraftBlockRenderer._textureRepository.GetTexture(textureId)
-		if texture != nil {
+		if texture != nil && !_minecraftBlockRenderer._textureRepository.IsMissingTexture(texture) {
 			available = append(available, textureId)
+		} else if texture != nil {
+			missing = append(missing, textureId)
 		}
 	}
 
 	if len(available) == 0 {
-		return nil
+		if len(missing) > 0 {
+			fmt.Printf("warning: item %q could not resolve any texture from candidates %v; using missing texture placeholder\n", tintContext, missing)
+			available = append(available, missing[0])
+		} else {
+			return nil
+		}
 	}
 
 	// fmt.Printf("\navailable: %v\noptions: %v\ntintContext: %v\n", available, options, tintContext)
@@ -2268,12 +2279,14 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) CollectBillboardTextures(
 		}
 	}
 
-	if crossTexture, found := model.Textures["cross"]; found {
-		tryAdd(&crossTexture)
-	}
+	if model != nil {
+		if crossTexture, found := model.Textures["cross"]; found {
+			tryAdd(&crossTexture)
+		}
 
-	if genericTexture, found := model.Textures["texture"]; found {
-		tryAdd(&genericTexture)
+		if genericTexture, found := model.Textures["texture"]; found {
+			tryAdd(&genericTexture)
+		}
 	}
 
 	if len(textures) == 0 && itemInfo != nil {
@@ -2319,11 +2332,15 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) EnumerateBlockFallbackNam
 	}
 
 	if itemInfo != nil {
-		for _, candidate := range _minecraftBlockRenderer.NormalizeToBlockCandidates(*itemInfo.Model) {
-			tryAdd(&candidate)
+		if itemInfo.Model != nil {
+			for _, candidate := range _minecraftBlockRenderer.NormalizeToBlockCandidates(*itemInfo.Model) {
+				tryAdd(&candidate)
+			}
 		}
-		for _, candidate := range _minecraftBlockRenderer.NormalizeToBlockCandidates(*itemInfo.Texture) {
-			tryAdd(&candidate)
+		if itemInfo.Texture != nil {
+			for _, candidate := range _minecraftBlockRenderer.NormalizeToBlockCandidates(*itemInfo.Texture) {
+				tryAdd(&candidate)
+			}
 		}
 	}
 
@@ -2402,6 +2419,16 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) NormalizeToBlockCandidate
 }
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryRenderBlockItem(blockName string, options BlockRenderOptions) *image.RGBA {
+	modelName := blockName
+	if _minecraftBlockRenderer._blockRegistry != nil {
+		if mappedModel, found := _minecraftBlockRenderer._blockRegistry.TryGetModel(blockName); found && strings.TrimSpace(mappedModel) != "" {
+			modelName = mappedModel
+		}
+	}
+	if _, found := _minecraftBlockRenderer._modelResolver.TryResolve(modelName); !found {
+		return nil
+	}
+
 	rendered := _minecraftBlockRenderer.RenderBlock(blockName, options)
 	if rendered == nil {
 		return nil
@@ -2427,6 +2454,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderFallbackTexture(ite
 		}
 	}
 
+	fmt.Printf("warning: item %q is using missing texture placeholder\n", itemName)
 	rendered, err := _minecraftBlockRenderer.RenderFlatItem([]string{"minecraft:missingno"}, options, itemName)
 	if err != nil {
 		return nil
@@ -2436,7 +2464,11 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderFallbackTexture(ite
 }
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryRenderEmbeddedTexture(textureId string, options BlockRenderOptions, tintContext string) *image.RGBA {
-	if _minecraftBlockRenderer._textureRepository.GetTexture(textureId) != nil {
+	texture := _minecraftBlockRenderer._textureRepository.GetTexture(textureId)
+	if texture != nil {
+		if _minecraftBlockRenderer._textureRepository.IsMissingTexture(texture) {
+			fmt.Printf("warning: item %q could not resolve texture %q; using missing texture placeholder\n", tintContext, textureId)
+		}
 		rendered, err := _minecraftBlockRenderer.RenderFlatItem([]string{textureId}, options, tintContext)
 		if err != nil {
 			return nil
@@ -2451,6 +2483,9 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) EnumerateTextureFallbackC
 	var candidates []string
 	seen := make(map[string]struct{})
 	normalized := _minecraftBlockRenderer.NormalizeItemTextureKey(itemName)
+	if strings.Contains(normalized, ":") {
+		return []string{normalized}
+	}
 
 	for _, candidate := range _minecraftBlockRenderer.EnumerateTextureNameVariants(normalized) {
 		if _, exists := seen[candidate]; !exists {
@@ -2473,6 +2508,10 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) EnumerateTextureFallbackC
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) EnumerateTextureNameVariants(textureKey string) []string {
 	var candidates []string
+	if strings.Contains(textureKey, ":") {
+		candidates = append(candidates, textureKey)
+		return candidates
+	}
 	candidates = append(candidates, textureKey)
 	candidates = append(candidates, fmt.Sprintf("minecraft:item/%s", textureKey))
 	candidates = append(candidates, fmt.Sprintf("item/%s", textureKey))

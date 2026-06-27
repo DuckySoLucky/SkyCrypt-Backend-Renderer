@@ -63,6 +63,9 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) BuildTrianglesForElement(
 		} else {
 			texture = _minecraftBlockRenderer._textureRepository.GetTexture(textureId)
 		}
+		if _minecraftBlockRenderer._textureRepository.IsMissingTexture(texture) {
+			fmt.Printf("warning: model %q face %q could not resolve texture %q; using missing texture placeholder\n", blockName, data.BlockFaceDirectionToString(direction), textureId)
+		}
 
 		faceUv := _minecraftBlockRenderer.GetFaceUv(face, direction, element)
 
