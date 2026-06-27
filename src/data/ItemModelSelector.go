@@ -15,6 +15,7 @@ const maxItemModelSelectorRecursionDepth = 10000
 type ItemRenderData struct {
 	CustomData               *nbt.NbtCompound
 	Profile                  *nbt.NbtCompound
+	ItemModel                string
 	Layer0Tint               *color.RGBA
 	AdditionalLayerTints     map[int]*color.RGBA
 	DisableDefaultLayer0Tint bool
@@ -26,6 +27,7 @@ type ItemModelContext struct {
 	ItemData       *ItemRenderData
 	DisplayContext string
 	ItemName       string
+	ItemModel      string
 }
 
 type ItemModelSelector interface {
@@ -78,6 +80,13 @@ func ResolveAllItemModelSelector(selector ItemModelSelector, context ItemModelCo
 			}
 		}
 		if len(result) == 0 && typed.shouldResolveFirstCaseOnUnsupportedSelector() {
+			if len(typed.Cases) > 0 {
+				if resolved := ResolveAllItemModelSelector(typed.Cases[0].Selector, context); len(resolved) > 0 {
+					result = resolved
+				}
+			}
+		}
+		if len(result) == 0 && typed.shouldResolveFirstCaseOnMissingItemModel(context) {
 			if len(typed.Cases) > 0 {
 				if resolved := ResolveAllItemModelSelector(typed.Cases[0].Selector, context); len(resolved) > 0 {
 					result = resolved
@@ -660,6 +669,12 @@ func (s *ItemModelSelectorSelect) Resolve(context ItemModelContext) *string {
 		}
 	}
 
+	if s.shouldResolveFirstCaseOnMissingItemModel(context) {
+		if firstResolved := s.resolveFirstCase(context); firstResolved != nil && strings.TrimSpace(*firstResolved) != "" {
+			return firstResolved
+		}
+	}
+
 	if s.Fallback == nil {
 		return nil
 	}
@@ -671,6 +686,16 @@ func (s *ItemModelSelectorSelect) shouldResolveFirstCaseOnUnsupportedSelector() 
 		return !catharsisDataTypeResolver{}.SupportsSelectValue(pointerString(s.DataType))
 	}
 	return false
+}
+
+func (s *ItemModelSelectorSelect) shouldResolveFirstCaseOnMissingItemModel(context ItemModelContext) bool {
+	if s == nil || len(s.Cases) == 0 {
+		return false
+	}
+	if !strings.EqualFold(s.Property, "component") || !isItemModelComponent(pointerString(s.Component)) {
+		return false
+	}
+	return strings.TrimSpace(contextItemModel(context)) == ""
 }
 
 func (s *ItemModelSelectorSelect) resolveFirstCase(context ItemModelContext) *string {
@@ -726,14 +751,14 @@ func matchesComponentValue(component string, value string, context ItemModelCont
 
 	itemData := context.ItemData
 
-	if strings.EqualFold(component, "item_model") || strings.EqualFold(component, "minecraft:item_model") {
-		if strings.TrimSpace(value) == "" || strings.TrimSpace(context.ItemName) == "" {
+	if isItemModelComponent(component) {
+		if strings.TrimSpace(value) == "" {
 			return false
 		}
-		if strings.EqualFold(value, context.ItemName) {
+		if itemModel := contextItemModel(context); itemModel != "" && itemModelMatches(value, itemModel) {
 			return true
 		}
-		return strings.EqualFold(value, "minecraft:"+context.ItemName)
+		return itemModelMatches(value, context.ItemName)
 	}
 
 	if itemData == nil {
@@ -752,6 +777,38 @@ func matchesComponentValue(component string, value string, context ItemModelCont
 		return itemData.Layer0Tint != nil || len(itemData.AdditionalLayerTints) > 0 || itemData.DisableDefaultLayer0Tint
 	}
 
+	return false
+}
+
+func isItemModelComponent(component string) bool {
+	return strings.EqualFold(component, "item_model") || strings.EqualFold(component, "minecraft:item_model")
+}
+
+func contextItemModel(context ItemModelContext) string {
+	if strings.TrimSpace(context.ItemModel) != "" {
+		return strings.TrimSpace(context.ItemModel)
+	}
+	if context.ItemData != nil && strings.TrimSpace(context.ItemData.ItemModel) != "" {
+		return strings.TrimSpace(context.ItemData.ItemModel)
+	}
+	return ""
+}
+
+func itemModelMatches(expected string, actual string) bool {
+	expected = strings.ToLower(strings.TrimSpace(expected))
+	actual = strings.ToLower(strings.TrimSpace(actual))
+	if expected == "" || actual == "" {
+		return false
+	}
+	if expected == actual {
+		return true
+	}
+	if !strings.Contains(actual, ":") && expected == "minecraft:"+actual {
+		return true
+	}
+	if !strings.Contains(expected, ":") && actual == "minecraft:"+expected {
+		return true
+	}
 	return false
 }
 

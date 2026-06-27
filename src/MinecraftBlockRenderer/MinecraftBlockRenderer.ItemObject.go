@@ -252,6 +252,7 @@ func buildItemObjectRenderData(normalized *data.NormalizedItemInput) *data.ItemR
 	}
 
 	itemData := &data.ItemRenderData{}
+	itemData.ItemModel = resolveItemObjectSelectorModel(normalized)
 	if normalized.ExtraAttributes != nil {
 		itemData.CustomData = data.DecodedMapToNbtCompound(normalized.ExtraAttributes)
 	}
@@ -262,11 +263,29 @@ func buildItemObjectRenderData(normalized *data.NormalizedItemInput) *data.ItemR
 		itemData.Profile = skullProfileMapToNbtCompound(normalized.SkullProfile)
 	}
 
-	if itemData.CustomData == nil && itemData.Profile == nil && itemData.Layer0Tint == nil {
+	if itemData.CustomData == nil && itemData.Profile == nil && itemData.Layer0Tint == nil && strings.TrimSpace(itemData.ItemModel) == "" {
 		return nil
 	}
 
 	return itemData
+}
+
+func resolveItemObjectSelectorModel(normalized *data.NormalizedItemInput) string {
+	if normalized == nil {
+		return ""
+	}
+	if strings.TrimSpace(normalized.ItemModel) != "" {
+		return strings.TrimSpace(normalized.ItemModel)
+	}
+	if strings.TrimSpace(normalized.ItemID) != "" {
+		return strings.TrimSpace(normalized.ItemID)
+	}
+	if normalized.NumericID != nil {
+		if mapped, ok := legacyNumericItemID(*normalized.NumericID, normalized.Damage); ok {
+			return "minecraft:" + mapped
+		}
+	}
+	return ""
 }
 
 func ensureItemRenderData(itemData *data.ItemRenderData) *data.ItemRenderData {

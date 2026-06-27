@@ -91,6 +91,86 @@ func TestCatharsisNumericDataTypeSupportsMidasPaidValue(t *testing.T) {
 	}
 }
 
+func TestComponentItemModelMatchesExplicitItemModel(t *testing.T) {
+	selector := mustParseSelector(t, `{
+		"model": {
+			"type": "select",
+			"property": "component",
+			"component": "item_model",
+			"cases": [
+				{"when": "minecraft:diamond_sword", "model": {"type": "model", "model": "item_melee:item/atomsplit_katana"}},
+				{"when": "minecraft:golden_sword", "model": {"type": "model", "model": "item_melee:item/atomsplit_katana_ability"}}
+			]
+		}
+	}`)
+
+	resolved := selector.Resolve(ItemModelContext{ItemName: "firmskyblock:item/atomsplit_katana", ItemModel: "minecraft:diamond_sword", DisplayContext: "gui"})
+	if resolved == nil || *resolved != "item_melee:item/atomsplit_katana" {
+		t.Fatalf("resolved = %v, want atomsplit katana", resolved)
+	}
+}
+
+func TestComponentItemModelMatchesItemRenderDataModel(t *testing.T) {
+	selector := mustParseSelector(t, `{
+		"model": {
+			"type": "select",
+			"property": "component",
+			"component": "minecraft:item_model",
+			"cases": [
+				{"when": "minecraft:diamond_sword", "model": {"type": "model", "model": "item_melee:item/atomsplit_katana"}},
+				{"when": "minecraft:golden_sword", "model": {"type": "model", "model": "item_melee:item/atomsplit_katana_ability"}}
+			]
+		}
+	}`)
+
+	resolved := selector.Resolve(ItemModelContext{
+		ItemData:       &ItemRenderData{ItemModel: "minecraft:golden_sword"},
+		ItemName:       "firmskyblock:item/atomsplit_katana",
+		DisplayContext: "gui",
+	})
+	if resolved == nil || *resolved != "item_melee:item/atomsplit_katana_ability" {
+		t.Fatalf("resolved = %v, want atomsplit ability", resolved)
+	}
+}
+
+func TestComponentItemModelFallsBackToFirstCaseWhenItemModelMissing(t *testing.T) {
+	selector := mustParseSelector(t, `{
+		"model": {
+			"type": "select",
+			"property": "component",
+			"component": "item_model",
+			"cases": [
+				{"when": "minecraft:diamond_sword", "model": {"type": "model", "model": "item_melee:item/atomsplit_katana"}},
+				{"when": "minecraft:golden_sword", "model": {"type": "model", "model": "item_melee:item/atomsplit_katana_ability"}}
+			]
+		}
+	}`)
+
+	resolved := ResolveAllItemModelSelector(selector, ItemModelContext{ItemName: "firmskyblock:item/atomsplit_katana", DisplayContext: "gui"})
+	if len(resolved) != 1 || resolved[0] != "item_melee:item/atomsplit_katana" {
+		t.Fatalf("resolved = %v, want first item_model case", resolved)
+	}
+}
+
+func TestComponentItemModelDoesNotDefaultWhenExplicitItemModelMismatches(t *testing.T) {
+	selector := mustParseSelector(t, `{
+		"model": {
+			"type": "select",
+			"property": "component",
+			"component": "item_model",
+			"cases": [
+				{"when": "minecraft:diamond_sword", "model": {"type": "model", "model": "item_melee:item/atomsplit_katana"}},
+				{"when": "minecraft:golden_sword", "model": {"type": "model", "model": "item_melee:item/atomsplit_katana_ability"}}
+			]
+		}
+	}`)
+
+	resolved := ResolveAllItemModelSelector(selector, ItemModelContext{ItemName: "firmskyblock:item/atomsplit_katana", ItemModel: "minecraft:stick", DisplayContext: "gui"})
+	if len(resolved) != 0 {
+		t.Fatalf("resolved = %v, want no model for explicit mismatch", resolved)
+	}
+}
+
 func TestResolveAllFallsBackToSingularSelectResolution(t *testing.T) {
 	selector := mustParseSelector(t, `{
 		"model": {

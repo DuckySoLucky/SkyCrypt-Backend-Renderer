@@ -152,6 +152,53 @@ func TestNormalizeItemInputFromMap(t *testing.T) {
 	}
 }
 
+func TestNormalizeItemInputReadsRootItemIDAlias(t *testing.T) {
+	input := map[string]any{
+		"item_id": "minecraft:diamond_sword",
+		"tag": map[string]any{
+			"ExtraAttributes": map[string]any{
+				"id": "ATOMSPLIT_KATANA",
+			},
+		},
+	}
+
+	normalized, err := NormalizeItemInput(input)
+	if err != nil {
+		t.Fatalf("NormalizeItemInput returned error: %v", err)
+	}
+
+	if normalized.ItemID != "minecraft:diamond_sword" {
+		t.Fatalf("ItemID = %q", normalized.ItemID)
+	}
+	if normalized.SkyblockID != "ATOMSPLIT_KATANA" {
+		t.Fatalf("SkyblockID = %q", normalized.SkyblockID)
+	}
+}
+
+func TestNormalizeItemInputRootItemIDOverridesNonVanillaRootID(t *testing.T) {
+	input := map[string]any{
+		"id":      "ATOMSPLIT_KATANA",
+		"item_id": "minecraft:diamond_sword",
+		"tag": map[string]any{
+			"ExtraAttributes": map[string]any{
+				"id": "ATOMSPLIT_KATANA",
+			},
+		},
+	}
+
+	normalized, err := NormalizeItemInput(input)
+	if err != nil {
+		t.Fatalf("NormalizeItemInput returned error: %v", err)
+	}
+
+	if normalized.ItemID != "minecraft:diamond_sword" {
+		t.Fatalf("ItemID = %q", normalized.ItemID)
+	}
+	if normalized.SkyblockID != "ATOMSPLIT_KATANA" {
+		t.Fatalf("SkyblockID = %q", normalized.SkyblockID)
+	}
+}
+
 func TestNormalizeItemInputUsesNbtTagsWhenJsonTagsAreAbsent(t *testing.T) {
 	type nbtOnlyExtra struct {
 		ID string `nbt:"id"`

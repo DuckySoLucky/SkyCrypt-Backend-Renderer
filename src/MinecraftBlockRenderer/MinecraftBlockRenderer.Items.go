@@ -234,6 +234,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) ResolveItemModel(itemName
 			ItemData:       options.ItemData,
 			DisplayContext: displayContext,
 			ItemName:       itemName,
+			ItemModel:      itemModelForSelectorContext(options.ItemData),
 		}
 		dynamicModels = compactModelNames(data.ResolveAllItemModelSelector(itemInfo.Selector, selectorContext))
 		if len(dynamicModels) > 0 {
@@ -483,6 +484,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) GetSkyblockItemModels(ite
 						ItemData:       itemData,
 						DisplayContext: displayContext,
 						ItemName:       itemName,
+						ItemModel:      itemModelForSelectorContext(itemData),
 					}
 					models = data.ResolveAllItemModelSelector(info.Selector, selectorContext)
 				}
@@ -545,6 +547,13 @@ func nbtStringFromTag(tag nbt.NbtTag) (string, bool) {
 	}
 }
 
+func itemModelForSelectorContext(itemData *data.ItemRenderData) string {
+	if itemData == nil {
+		return ""
+	}
+	return strings.TrimSpace(itemData.ItemModel)
+}
+
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) ResolveSkyblockItemModelFromPackProviders(encodedId string, itemName string, itemData *data.ItemRenderData, displayContext string) *string {
 	models := _minecraftBlockRenderer.ResolveSkyblockItemModelsFromPackProviders(encodedId, itemName, itemData, displayContext)
 	if len(models) == 0 {
@@ -569,6 +578,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) ResolveSkyblockItemModels
 			ItemData:       itemData,
 			DisplayContext: displayContext,
 			ItemName:       itemName,
+			ItemModel:      itemModelForSelectorContext(itemData),
 		})
 		if len(resolved) > 0 {
 			filtered := filterNamespacedModels(resolved)
@@ -830,6 +840,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) ShouldPreferPlayerHeadRen
 				updatedItemData = &data.ItemRenderData{
 					CustomData: mergedCustom,
 					Profile:    profile,
+					ItemModel:  itemData.ItemModel,
 				}
 			}
 

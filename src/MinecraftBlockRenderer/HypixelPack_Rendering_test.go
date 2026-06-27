@@ -157,6 +157,113 @@ func TestRenderSkyBlockItemIDUsesFsrSelector(t *testing.T) {
 	}
 }
 
+func TestRenderSkyBlockItemIDUsesFsrAtomsplitFirstItemModelCase(t *testing.T) {
+	assetsRoot := requireFullAssets(t)
+	packRoot := requireTexturePack(t, "fsr")
+	registry := texturepacks.NewTexturePackRegistry()
+	if _, err := registry.RegisterPack(packRoot); err != nil {
+		t.Fatal(err)
+	}
+	renderer := CreateFromMinecraftAssets(assetsRoot, registry, []string{"fsr"})
+
+	rendered, err := renderer.RenderSkyBlockItemID("ATOMSPLIT_KATANA", &BlockRenderOptions{
+		Size:    64,
+		PackIds: []string{"fsr"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rendered == nil || !hasOpaquePixels(rendered.Image) {
+		t.Fatal("FSR Atomsplit SkyBlock ID render did not produce visible pixels")
+	}
+	model := ""
+	if rendered.ResourceId.Model != nil {
+		model = *rendered.ResourceId.Model
+	}
+	lowerModel := strings.ToLower(model)
+	if rendered.ResourceId.SourcePackId != "fsr" || !strings.Contains(lowerModel, "atomsplit_katana") || strings.Contains(lowerModel, "ability") {
+		t.Fatalf("resource did not resolve to normal FSR Atomsplit model: source=%s model=%s textures=%v", rendered.ResourceId.SourcePackId, model, rendered.ResourceId.Textures)
+	}
+}
+
+func TestRenderItemNBTUsesFsrAtomsplitBaseItemModel(t *testing.T) {
+	assetsRoot := requireFullAssets(t)
+	packRoot := requireTexturePack(t, "fsr")
+	registry := texturepacks.NewTexturePackRegistry()
+	if _, err := registry.RegisterPack(packRoot); err != nil {
+		t.Fatal(err)
+	}
+	renderer := CreateFromMinecraftAssets(assetsRoot, registry, []string{"fsr"})
+
+	item := map[string]any{
+		"id":      "ATOMSPLIT_KATANA",
+		"item_id": "minecraft:diamond_sword",
+		"tag": map[string]any{
+			"ExtraAttributes": map[string]any{
+				"id": "ATOMSPLIT_KATANA",
+			},
+		},
+	}
+
+	rendered, err := renderer.RenderItemNBT(item, &BlockRenderOptions{
+		Size:    64,
+		PackIds: []string{"fsr"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rendered == nil || !hasOpaquePixels(rendered.Image) {
+		t.Fatal("FSR Atomsplit NBT render did not produce visible pixels")
+	}
+	model := ""
+	if rendered.ResourceId.Model != nil {
+		model = *rendered.ResourceId.Model
+	}
+	lowerModel := strings.ToLower(model)
+	if rendered.ResourceId.SourcePackId != "fsr" || !strings.Contains(lowerModel, "atomsplit_katana") || strings.Contains(lowerModel, "ability") {
+		t.Fatalf("resource did not resolve to normal FSR Atomsplit model: source=%s model=%s textures=%v", rendered.ResourceId.SourcePackId, model, rendered.ResourceId.Textures)
+	}
+}
+
+func TestRenderItemNBTUsesFsrAtomsplitAbilityBaseItemModel(t *testing.T) {
+	assetsRoot := requireFullAssets(t)
+	packRoot := requireTexturePack(t, "fsr")
+	registry := texturepacks.NewTexturePackRegistry()
+	if _, err := registry.RegisterPack(packRoot); err != nil {
+		t.Fatal(err)
+	}
+	renderer := CreateFromMinecraftAssets(assetsRoot, registry, []string{"fsr"})
+
+	item := map[string]any{
+		"id":      "ATOMSPLIT_KATANA",
+		"item_id": "minecraft:golden_sword",
+		"tag": map[string]any{
+			"ExtraAttributes": map[string]any{
+				"id": "ATOMSPLIT_KATANA",
+			},
+		},
+	}
+
+	rendered, err := renderer.RenderItemNBT(item, &BlockRenderOptions{
+		Size:    64,
+		PackIds: []string{"fsr"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rendered == nil || !hasOpaquePixels(rendered.Image) {
+		t.Fatal("FSR Atomsplit ability NBT render did not produce visible pixels")
+	}
+	model := ""
+	if rendered.ResourceId.Model != nil {
+		model = *rendered.ResourceId.Model
+	}
+	lowerModel := strings.ToLower(model)
+	if rendered.ResourceId.SourcePackId != "fsr" || !strings.Contains(lowerModel, "atomsplit_katana_ability") {
+		t.Fatalf("resource did not resolve to FSR Atomsplit ability model: source=%s model=%s textures=%v", rendered.ResourceId.SourcePackId, model, rendered.ResourceId.Textures)
+	}
+}
+
 func TestRenderGemstoneGauntlet3DModelUsesHPlusSelector(t *testing.T) {
 	assetsRoot := requireFullAssets(t)
 	packRoot := requireTexturePack(t, "hplus")

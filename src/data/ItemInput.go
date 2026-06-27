@@ -42,15 +42,25 @@ func NormalizeItemInput(input any) (*NormalizedItemInput, error) {
 		Raw:   input,
 	}
 
-	if idValue, ok := lookupValue(root, "id", "ID", "ItemID", "itemId", "RawId", "raw_id"); ok {
-		if id, ok := toInt(idValue); ok {
-			normalized.NumericID = &id
-		} else if id, ok := toString(idValue); ok {
-			normalized.ItemID = strings.TrimSpace(id)
-			if numeric, ok := parseIntString(id); ok {
-				normalized.NumericID = &numeric
-			}
-		}
+	if idValue, ok := lookupValue(root, "id", "ID", "RawId", "raw_id"); ok {
+		applyItemIdentifier(normalized, idValue)
+	}
+
+	if itemIDValue, ok := lookupValue(
+		root,
+		"item_id",
+		"itemId",
+		"itemID",
+		"ItemID",
+		"minecraft_id",
+		"minecraftId",
+		"minecraftID",
+		"MinecraftID",
+		"raw_item_id",
+		"rawItemId",
+		"RawItemID",
+	); ok {
+		applyItemIdentifier(normalized, itemIDValue)
 	}
 
 	if countValue, ok := lookupValue(root, "Count", "count"); ok {
@@ -148,6 +158,22 @@ func DecodedMapToNbtCompound(values map[string]any) *nbt.NbtCompound {
 		return nil
 	}
 	return nbt.NewNbtCompound(items)
+}
+
+func applyItemIdentifier(normalized *NormalizedItemInput, value any) {
+	if normalized == nil {
+		return
+	}
+	if id, ok := toInt(value); ok {
+		normalized.NumericID = &id
+		return
+	}
+	if id, ok := toString(value); ok {
+		normalized.ItemID = strings.TrimSpace(id)
+		if numeric, ok := parseIntString(id); ok {
+			normalized.NumericID = &numeric
+		}
+	}
 }
 
 func decodedValueToNbtTag(value any) (nbt.NbtTag, bool) {
@@ -367,6 +393,10 @@ func lookupValue(values map[string]any, keys ...string) (any, bool) {
 func toString(value any) (string, bool) {
 	if value == nil {
 		return "", false
+	}
+	rv := unwrapReflectValue(reflect.ValueOf(value))
+	if rv.IsValid() && rv.CanInterface() {
+		value = rv.Interface()
 	}
 	switch typed := value.(type) {
 	case string:
