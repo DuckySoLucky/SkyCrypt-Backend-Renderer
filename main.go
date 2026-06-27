@@ -11,7 +11,9 @@ import (
 	"sync"
 
 	mbr "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/MinecraftBlockRenderer"
+	nbt "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/NBT"
 	texturepacks "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/TexturePacks"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
 	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/imagecache"
 )
 
@@ -67,6 +69,13 @@ type renderInflight struct {
 	wg   sync.WaitGroup
 	item *RenderedItem
 	err  error
+}
+
+type renderDebugInfo struct {
+	SkyBlockID  string
+	MinecraftID string
+	ItemModel   string
+	DisplayName string
 }
 
 func NewRenderer(options Options) (*Renderer, error) {
@@ -150,8 +159,10 @@ func (r *Renderer) RenderItemNBT(item any) (*RenderedItem, error) {
 		return nil, fmt.Errorf("renderer is nil")
 	}
 	options := r.renderOptions()
+	debugInfo := debugInfoFromItemInput(item)
 	return r.cachedRenderedItem(
 		false,
+		debugInfo,
 		func() (*mbr.ResourceIdResult, error) {
 			return r.renderer.ComputeResourceIdFromNBT(item, options)
 		},
@@ -321,6 +332,7 @@ func (r *Renderer) cachedSkyBlockItemID(id string, overwrite bool) (*RenderedIte
 	options := r.renderOptions()
 	return r.cachedRenderedItem(
 		overwrite,
+		&renderDebugInfo{SkyBlockID: id, MinecraftID: "minecraft:player_head"},
 		func() (*mbr.ResourceIdResult, error) {
 			return r.renderer.ComputeResourceIdFromSkyBlockItemID(id, options)
 		},
@@ -330,7 +342,7 @@ func (r *Renderer) cachedSkyBlockItemID(id string, overwrite bool) (*RenderedIte
 	)
 }
 
-func (r *Renderer) cachedRenderedItem(overwrite bool, compute func() (*mbr.ResourceIdResult, error), render func() (*mbr.AnimatedRenderedResource, error)) (*RenderedItem, error) {
+func (r *Renderer) cachedRenderedItem(overwrite bool, debugInfo *renderDebugInfo, compute func() (*mbr.ResourceIdResult, error), render func() (*mbr.AnimatedRenderedResource, error)) (*RenderedItem, error) {
 	cacheDir, err := r.requireCacheDir()
 	if err != nil {
 		return nil, err
@@ -345,7 +357,7 @@ func (r *Renderer) cachedRenderedItem(overwrite bool, compute func() (*mbr.Resou
 
 	key := resourceID.ResourceId
 	target := &RenderedItem{
-		Path:          renderedWebPPath(cacheDir, key),
+		Path:          renderedDebugWebPPath(cacheDir, resourceID, debugInfo),
 		TexturePackID: sourcePackID(resourceID),
 	}
 
@@ -449,6 +461,196 @@ func (r *Renderer) finishRender(key string, inflight *renderInflight) {
 
 func renderedWebPPath(cacheDir string, resourceID string) string {
 	return filepath.Join(cacheDir, "rendered", resourceID+".webp")
+}
+
+func renderedDebugWebPPath(cacheDir string, resourceID *mbr.ResourceIdResult, debugInfo *renderDebugInfo) string {
+	if resourceID == nil {
+		return renderedWebPPath(cacheDir, "unknown")
+	}
+
+	var parts []string
+	if debugInfo != nil {
+		if strings.TrimSpace(debugInfo.SkyBlockID) != "" {
+			parts = append(parts, "skyblock="+debugInfo.SkyBlockID)
+		}
+		if strings.TrimSpace(debugInfo.MinecraftID) != "" {
+			parts = append(parts, "mc="+debugInfo.MinecraftID)
+		}
+		if strings.TrimSpace(debugInfo.ItemModel) != "" {
+			parts = append(parts, "itemmodel="+debugInfo.ItemModel)
+		}
+		if strings.TrimSpace(debugInfo.DisplayName) != "" {
+			parts = append(parts, "name="+debugInfo.DisplayName)
+		}
+	}
+	if strings.TrimSpace(resourceID.SourcePackId) != "" {
+		parts = append(parts, "pack="+resourceID.SourcePackId)
+	}
+	if resourceID.Model != nil && strings.TrimSpace(*resourceID.Model) != "" {
+		parts = append(parts, "model="+*resourceID.Model)
+	}
+	for i, texture := range resourceID.Textures {
+		if i >= 2 {
+			break
+		}
+		if strings.TrimSpace(texture) != "" {
+			parts = append(parts, fmt.Sprintf("tex%d=%s", i+1, texture))
+		}
+	}
+
+	hash := strings.TrimSpace(resourceID.ResourceId)
+	if len(hash) > 12 {
+		hash = hash[:12]
+	}
+	parts = append(parts, "hash="+hash)
+
+	filename := sanitizeDebugFilename(strings.Join(parts, "__"))
+	if filename == "" {
+		filename = sanitizeDebugFilename(resourceID.ResourceId)
+	}
+	return filepath.Join(cacheDir, "rendered", filename+".webp")
+}
+
+func debugInfoFromItemInput(item any) *renderDebugInfo {
+	if info := debugInfoFromNbtCompoundInput(item); info != nil {
+		return info
+	}
+
+	normalized, err := data.NormalizeItemInput(item)
+	if err != nil || normalized == nil {
+		return nil
+	}
+
+	info := &renderDebugInfo{
+		SkyBlockID:  normalized.SkyblockID,
+		MinecraftID: normalized.ItemID,
+		ItemModel:   normalized.ItemModel,
+		DisplayName: normalized.DisplayName,
+	}
+	if info.MinecraftID == "" && normalized.NumericID != nil {
+		info.MinecraftID = fmt.Sprintf("numeric_%d", *normalized.NumericID)
+	}
+	if strings.TrimSpace(info.SkyBlockID) == "" &&
+		strings.TrimSpace(info.MinecraftID) == "" &&
+		strings.TrimSpace(info.ItemModel) == "" &&
+		strings.TrimSpace(info.DisplayName) == "" {
+		return nil
+	}
+	return info
+}
+
+func debugInfoFromNbtCompoundInput(item any) *renderDebugInfo {
+	var compound *nbt.NbtCompound
+	switch typed := item.(type) {
+	case *nbt.NbtCompound:
+		compound = typed
+	case nbt.NbtCompound:
+		compound = &typed
+	default:
+		return nil
+	}
+	if compound == nil {
+		return nil
+	}
+
+	info := &renderDebugInfo{}
+	if id, ok := nbtCompoundString(compound, "id"); ok {
+		info.MinecraftID = id
+	}
+	if tag, ok := nbtCompoundChild(compound, "tag"); ok {
+		if extra, ok := nbtCompoundChild(tag, "ExtraAttributes"); ok {
+			if skyblockID, ok := nbtCompoundString(extra, "id"); ok {
+				info.SkyBlockID = skyblockID
+			}
+		}
+		if display, ok := nbtCompoundChild(tag, "display"); ok {
+			if name, ok := nbtCompoundString(display, "Name"); ok {
+				info.DisplayName = name
+			}
+		}
+		if model, ok := nbtCompoundString(tag, "ItemModel"); ok {
+			info.ItemModel = model
+		}
+	}
+
+	if strings.TrimSpace(info.SkyBlockID) == "" &&
+		strings.TrimSpace(info.MinecraftID) == "" &&
+		strings.TrimSpace(info.ItemModel) == "" &&
+		strings.TrimSpace(info.DisplayName) == "" {
+		return nil
+	}
+	return info
+}
+
+func nbtCompoundChild(compound *nbt.NbtCompound, key string) (*nbt.NbtCompound, bool) {
+	if compound == nil {
+		return nil, false
+	}
+	tag, ok := compound.Get(key)
+	if !ok {
+		return nil, false
+	}
+	switch typed := tag.(type) {
+	case *nbt.NbtCompound:
+		return typed, true
+	default:
+		return nil, false
+	}
+}
+
+func nbtCompoundString(compound *nbt.NbtCompound, key string) (string, bool) {
+	if compound == nil {
+		return "", false
+	}
+	tag, ok := compound.Get(key)
+	if !ok {
+		return "", false
+	}
+	switch typed := tag.(type) {
+	case nbt.NbtString:
+		return strings.TrimSpace(typed.Value), strings.TrimSpace(typed.Value) != ""
+	case *nbt.NbtString:
+		if typed == nil {
+			return "", false
+		}
+		return strings.TrimSpace(typed.Value), strings.TrimSpace(typed.Value) != ""
+	default:
+		return "", false
+	}
+}
+
+func sanitizeDebugFilename(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+
+	var builder strings.Builder
+	builder.Grow(len(value))
+	lastWasUnderscore := false
+	for _, r := range value {
+		allowed := (r >= 'a' && r <= 'z') ||
+			(r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') ||
+			r == '-' || r == '_' || r == '.' || r == '='
+		if allowed {
+			builder.WriteRune(r)
+			lastWasUnderscore = false
+			continue
+		}
+		if !lastWasUnderscore {
+			builder.WriteByte('_')
+			lastWasUnderscore = true
+		}
+	}
+
+	filename := strings.Trim(builder.String(), "._-")
+	const maxFilenameLength = 220
+	if len(filename) > maxFilenameLength {
+		filename = filename[:maxFilenameLength]
+		filename = strings.Trim(filename, "._-")
+	}
+	return filename
 }
 
 func sourcePackID(resourceID *mbr.ResourceIdResult) string {

@@ -96,16 +96,18 @@ func TestRenderItemNBTWritesWebPCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expectedPath := renderedWebPPath(renderer.cacheDir, expectedResource.ResourceId)
 
-	item, err := renderer.RenderItemNBT(map[string]any{
+	input := map[string]any{
 		"id": "minecraft:player_head",
 		"tag": map[string]any{
 			"ExtraAttributes": map[string]any{
 				"id": "TEST_ITEM",
 			},
 		},
-	})
+	}
+	expectedPath := renderedDebugWebPPath(renderer.cacheDir, expectedResource, debugInfoFromItemInput(input))
+
+	item, err := renderer.RenderItemNBT(input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,18 +127,19 @@ func TestRenderItemNBTCompoundWritesSkyBlockPackCache(t *testing.T) {
 
 	rootID := nbt.NewNbtString("minecraft:player_head")
 	extraID := nbt.NewNbtString("TEST_ITEM")
-	item, err := renderer.RenderItemNBT(nbt.NewNbtCompound(map[string]nbt.NbtTag{
+	input := nbt.NewNbtCompound(map[string]nbt.NbtTag{
 		"id": &rootID,
 		"tag": nbt.NewNbtCompound(map[string]nbt.NbtTag{
 			"ExtraAttributes": nbt.NewNbtCompound(map[string]nbt.NbtTag{
 				"id": &extraID,
 			}),
 		}),
-	}))
+	})
+	item, err := renderer.RenderItemNBT(input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if item.Path != renderedWebPPath(renderer.cacheDir, expectedResource.ResourceId) {
+	if item.Path != renderedDebugWebPPath(renderer.cacheDir, expectedResource, debugInfoFromItemInput(input)) {
 		t.Fatalf("RenderItemNBT path = %q, want SkyBlock ID path", item.Path)
 	}
 	assertRenderedItem(t, renderer, item, sourcePackID(expectedResource))
@@ -151,7 +154,7 @@ func TestRenderItemNBTSkyBlockPackIgnoresVanillaDisplayTint(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	item, err := renderer.RenderItemNBT(map[string]any{
+	input := map[string]any{
 		"id": "minecraft:player_head",
 		"tag": map[string]any{
 			"display": map[string]any{
@@ -161,11 +164,12 @@ func TestRenderItemNBTSkyBlockPackIgnoresVanillaDisplayTint(t *testing.T) {
 				"id": "TEST_ITEM",
 			},
 		},
-	})
+	}
+	item, err := renderer.RenderItemNBT(input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if item.Path != renderedWebPPath(renderer.cacheDir, expectedResource.ResourceId) {
+	if item.Path != renderedDebugWebPPath(renderer.cacheDir, expectedResource, debugInfoFromItemInput(input)) {
 		t.Fatalf("RenderItemNBT path = %q, want SkyBlock ID path", item.Path)
 	}
 	assertRenderedItem(t, renderer, item, sourcePackID(expectedResource))

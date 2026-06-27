@@ -120,20 +120,22 @@ func (renderer *MinecraftBlockRenderer) IsDefault(context SkullResolverContext) 
 }
 
 type BlockRenderOptions struct {
-	Size                  int
-	YawInDegrees          float64
-	PitchInDegrees        float64
-	RollInDegrees         float64
-	PerspectiveAmount     float64
-	UseGuiTransform       bool
-	Padding               float64
-	AdditionalScale       float64
-	AdditionalTranslation data.Vector3
-	OverrideGuiTransform  *data.TransformDefinition
-	PackIds               []string
-	ItemData              *data.ItemRenderData
-	SkullTextureResolver  func(context SkullResolverContext) *string
-	EnableAntiAliasing    bool
+	Size                      int
+	YawInDegrees              float64
+	PitchInDegrees            float64
+	RollInDegrees             float64
+	PerspectiveAmount         float64
+	UseGuiTransform           bool
+	Padding                   float64
+	AdditionalScale           float64
+	AdditionalTranslation     data.Vector3
+	OverrideGuiTransform      *data.TransformDefinition
+	PackIds                   []string
+	ItemData                  *data.ItemRenderData
+	SkullTextureResolver      func(context SkullResolverContext) *string
+	EnableAntiAliasing        bool
+	CustomTextureFallbackItem string
+	CustomTextureFallbackData *data.ItemRenderData
 }
 
 func DefaultBlockRenderOptions() BlockRenderOptions {
@@ -193,6 +195,12 @@ func MergeBlockRenderOptions(options *BlockRenderOptions) BlockRenderOptions {
 	}
 	if options.EnableAntiAliasing {
 		effective.EnableAntiAliasing = true
+	}
+	if strings.TrimSpace(options.CustomTextureFallbackItem) != "" {
+		effective.CustomTextureFallbackItem = options.CustomTextureFallbackItem
+	}
+	if options.CustomTextureFallbackData != nil {
+		effective.CustomTextureFallbackData = options.CustomTextureFallbackData
 	}
 	return effective
 }

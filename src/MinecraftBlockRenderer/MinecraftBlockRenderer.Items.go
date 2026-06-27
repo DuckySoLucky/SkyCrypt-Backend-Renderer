@@ -190,6 +190,11 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderGuiItemInternal(ite
 	}
 
 	if model != nil && len(model.Elements) > 0 {
+		if _minecraftBlockRenderer.ShouldFallbackMissingCustomTexture(itemName, *options) && _minecraftBlockRenderer.ModelUsesMissingTexturePlaceholder(model) {
+			if fallback := _minecraftBlockRenderer.TryRenderCustomTextureFallback(itemName, *options, capture); fallback != nil {
+				return fallback
+			}
+		}
 		rendered := _minecraftBlockRenderer.RenderModel(model, *options, &itemName)
 		if rendered != nil {
 			return finalizeGuiResult(rendered)
@@ -199,6 +204,10 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderGuiItemInternal(ite
 	renderBlockEntityFallback := _minecraftBlockRenderer.TryRenderBlockEntityFallback(itemName, itemInfo, model, candidates, *options)
 	if renderBlockEntityFallback != nil {
 		return finalizeGuiResult(renderBlockEntityFallback)
+	}
+
+	if fallback := _minecraftBlockRenderer.TryRenderCustomTextureFallback(itemName, *options, capture); fallback != nil {
+		return fallback
 	}
 
 	return finalizeGuiResult(_minecraftBlockRenderer.RenderFallbackTexture(itemName, itemInfo, model, *options))
@@ -727,19 +736,21 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) ShouldPreferPlayerHeadRen
 			}
 
 			adjustedOptions = &BlockRenderOptions{
-				Size:                  options.Size,
-				YawInDegrees:          options.YawInDegrees,
-				PitchInDegrees:        options.PitchInDegrees,
-				RollInDegrees:         options.RollInDegrees,
-				PerspectiveAmount:     options.PerspectiveAmount,
-				UseGuiTransform:       options.UseGuiTransform,
-				AdditionalScale:       options.AdditionalScale,
-				AdditionalTranslation: options.AdditionalTranslation,
-				OverrideGuiTransform:  options.OverrideGuiTransform,
-				PackIds:               options.PackIds,
-				ItemData:              updatedItemData,
-				SkullTextureResolver:  options.SkullTextureResolver,
-				EnableAntiAliasing:    options.EnableAntiAliasing,
+				Size:                      options.Size,
+				YawInDegrees:              options.YawInDegrees,
+				PitchInDegrees:            options.PitchInDegrees,
+				RollInDegrees:             options.RollInDegrees,
+				PerspectiveAmount:         options.PerspectiveAmount,
+				UseGuiTransform:           options.UseGuiTransform,
+				AdditionalScale:           options.AdditionalScale,
+				AdditionalTranslation:     options.AdditionalTranslation,
+				OverrideGuiTransform:      options.OverrideGuiTransform,
+				PackIds:                   options.PackIds,
+				ItemData:                  updatedItemData,
+				SkullTextureResolver:      options.SkullTextureResolver,
+				EnableAntiAliasing:        options.EnableAntiAliasing,
+				CustomTextureFallbackItem: options.CustomTextureFallbackItem,
+				CustomTextureFallbackData: options.CustomTextureFallbackData,
 			}
 			itemData = updatedItemData
 		}
@@ -1485,6 +1496,10 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryRenderFlatItemFromIden
 
 	if len(available) == 0 {
 		if len(missing) > 0 {
+			if _minecraftBlockRenderer.ShouldFallbackMissingCustomTexture(tintContext, options) {
+				fmt.Printf("warning: item %q could not resolve custom textures from candidates %v; falling back to %q\n", tintContext, missing, options.CustomTextureFallbackItem)
+				return nil
+			}
 			fmt.Printf("warning: item %q could not resolve any texture from candidates %v; using missing texture placeholder\n", tintContext, missing)
 			available = append(available, missing[0])
 		} else {
@@ -2515,6 +2530,10 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryRenderEmbeddedTexture(
 	texture := _minecraftBlockRenderer._textureRepository.GetTexture(textureId)
 	if texture != nil {
 		if _minecraftBlockRenderer._textureRepository.IsMissingTexture(texture) {
+			if _minecraftBlockRenderer.ShouldFallbackMissingCustomTexture(tintContext, options) {
+				fmt.Printf("warning: item %q could not resolve custom texture %q; falling back to %q\n", tintContext, textureId, options.CustomTextureFallbackItem)
+				return nil
+			}
 			fmt.Printf("warning: item %q could not resolve texture %q; using missing texture placeholder\n", tintContext, textureId)
 		}
 		rendered, err := _minecraftBlockRenderer.RenderFlatItem([]string{textureId}, options, tintContext)
@@ -2525,6 +2544,52 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryRenderEmbeddedTexture(
 	}
 
 	return nil
+}
+
+func (_minecraftBlockRenderer *MinecraftBlockRenderer) ShouldFallbackMissingCustomTexture(itemName string, options BlockRenderOptions) bool {
+	fallbackItem := strings.TrimSpace(options.CustomTextureFallbackItem)
+	if fallbackItem == "" {
+		return false
+	}
+	if strings.EqualFold(_minecraftBlockRenderer.NormalizeItemTextureKey(itemName), _minecraftBlockRenderer.NormalizeItemTextureKey(fallbackItem)) {
+		return false
+	}
+	return true
+}
+
+func (_minecraftBlockRenderer *MinecraftBlockRenderer) ModelUsesMissingTexturePlaceholder(model *data.BlockModelInstance) bool {
+	if model == nil {
+		return false
+	}
+	for _, textureId := range _minecraftBlockRenderer.CollectResolvedTextures(model) {
+		texture := _minecraftBlockRenderer._textureRepository.GetTexture(textureId)
+		if texture != nil && _minecraftBlockRenderer._textureRepository.IsMissingTexture(texture) {
+			return true
+		}
+	}
+	return false
+}
+
+func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryRenderCustomTextureFallback(itemName string, options BlockRenderOptions, capture *ItemRenderCapture) *image.RGBA {
+	if !_minecraftBlockRenderer.ShouldFallbackMissingCustomTexture(itemName, options) {
+		return nil
+	}
+
+	fallbackItem := strings.TrimSpace(options.CustomTextureFallbackItem)
+	fallbackOptions := options
+	fallbackOptions.CustomTextureFallbackItem = ""
+	fallbackOptions.PackIds = nil
+	if fallbackOptions.CustomTextureFallbackData != nil {
+		fallbackOptions.ItemData = fallbackOptions.CustomTextureFallbackData
+		fallbackOptions.CustomTextureFallbackData = nil
+	}
+	fallbackRenderer := _minecraftBlockRenderer
+	if _minecraftBlockRenderer._packRegistry != nil && len(_minecraftBlockRenderer._packContext.PackIds) > 0 {
+		fallbackRenderer = _minecraftBlockRenderer.GetRendererForPackStack([]string{})
+	}
+
+	fmt.Printf("warning: item %q custom texture was not found; falling back to vanilla item %q\n", itemName, fallbackItem)
+	return fallbackRenderer.RenderGuiItemInternal(fallbackItem, &fallbackOptions, capture)
 }
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) EnumerateTextureFallbackCandidates(itemName string) []string {

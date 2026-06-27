@@ -126,6 +126,9 @@ func (renderer *MinecraftBlockRenderer) prepareSkyBlockItemIDRender(skyBlockItem
 	}
 
 	effectiveOptions := mergeItemObjectOptions(options, itemData)
+	if strings.TrimSpace(effectiveOptions.CustomTextureFallbackItem) == "" {
+		effectiveOptions.CustomTextureFallbackItem = "minecraft:player_head"
+	}
 	target := "minecraft:player_head"
 	if len(effectiveOptions.PackIds) > 0 {
 		target = "firmskyblock:item/" + renderer.EncodeFirmamentId(skyBlockItemID)
@@ -150,7 +153,34 @@ func (renderer *MinecraftBlockRenderer) resolvePackedSkyblockItemObjectName(norm
 	if strings.TrimSpace(normalized.SkyblockID) == "" {
 		return itemName
 	}
+	if strings.TrimSpace(options.CustomTextureFallbackItem) == "" {
+		options.CustomTextureFallbackItem = renderer.resolvePackedSkyblockFallbackItem(normalized, itemName)
+	}
 	return "firmskyblock:item/" + renderer.EncodeFirmamentId(normalized.SkyblockID)
+}
+
+func (renderer *MinecraftBlockRenderer) resolvePackedSkyblockFallbackItem(normalized *data.NormalizedItemInput, itemName string) string {
+	if normalized != nil {
+		if strings.TrimSpace(normalized.ItemID) != "" {
+			return normalized.ItemID
+		}
+		if normalized.NumericID != nil {
+			if mapped, ok := legacyNumericItemID(*normalized.NumericID, normalized.Damage); ok {
+				return "minecraft:" + mapped
+			}
+		}
+		if strings.TrimSpace(normalized.ItemModel) != "" {
+			return normalized.ItemModel
+		}
+	}
+	skyblockID := ""
+	if normalized != nil {
+		skyblockID = strings.TrimSpace(normalized.SkyblockID)
+	}
+	if strings.TrimSpace(itemName) != "" && !strings.EqualFold(itemName, skyblockID) {
+		return itemName
+	}
+	return "minecraft:player_head"
 }
 
 func (renderer *MinecraftBlockRenderer) normalizePackedSkyblockItemObjectOptions(normalized *data.NormalizedItemInput, options *BlockRenderOptions) *BlockRenderOptions {
@@ -163,6 +193,10 @@ func (renderer *MinecraftBlockRenderer) normalizePackedSkyblockItemObjectOptions
 
 	effectiveOptions := *options
 	itemData := *options.ItemData
+	if effectiveOptions.CustomTextureFallbackData == nil {
+		fallbackData := itemData
+		effectiveOptions.CustomTextureFallbackData = &fallbackData
+	}
 	itemData.Profile = nil
 	itemData.Layer0Tint = nil
 	itemData.AdditionalLayerTints = nil
