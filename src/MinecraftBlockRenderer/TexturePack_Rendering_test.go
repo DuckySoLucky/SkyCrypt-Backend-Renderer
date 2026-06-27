@@ -58,6 +58,66 @@ func TestMissingSkyBlockCustomTextureReturnsError(t *testing.T) {
 	}
 }
 
+func TestVanillaSkyBlockItemWithoutPackOverrideRendersVanillaItemObject(t *testing.T) {
+	assetsRoot := createMinimalAssets(t)
+	packRoot := createEmptyPack(t, "emptypack")
+
+	registry := texturepacks.NewTexturePackRegistry()
+	if _, err := registry.RegisterPack(packRoot); err != nil {
+		t.Fatal(err)
+	}
+	renderer := CreateFromMinecraftAssets(assetsRoot, registry, nil)
+
+	rendered, err := renderer.RenderItemObjectWithResourceId(map[string]any{
+		"id":      "EYE_OF_ENDER",
+		"item_id": "minecraft:eye_of_ender",
+		"tag": map[string]any{
+			"ExtraAttributes": map[string]any{
+				"id": "EYE_OF_ENDER",
+			},
+		},
+	}, &BlockRenderOptions{Size: 32, PackIds: []string{"emptypack"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rendered == nil || !hasOpaquePixels(rendered.Image) {
+		t.Fatal("vanilla SkyBlock item render did not produce visible pixels")
+	}
+	model := ""
+	if rendered.ResourceId.Model != nil {
+		model = *rendered.ResourceId.Model
+	}
+	if rendered.ResourceId.SourcePackId != "vanilla" || !strings.Contains(strings.ToLower(model), "eye_of_ender") {
+		t.Fatalf("resource did not resolve to vanilla eye of ender: source=%s model=%s textures=%v", rendered.ResourceId.SourcePackId, model, rendered.ResourceId.Textures)
+	}
+}
+
+func TestVanillaSkyBlockItemIDWithoutPackOverrideRendersVanilla(t *testing.T) {
+	assetsRoot := createMinimalAssets(t)
+	packRoot := createEmptyPack(t, "emptypack")
+
+	registry := texturepacks.NewTexturePackRegistry()
+	if _, err := registry.RegisterPack(packRoot); err != nil {
+		t.Fatal(err)
+	}
+	renderer := CreateFromMinecraftAssets(assetsRoot, registry, nil)
+
+	rendered, err := renderer.RenderSkyBlockItemID("EYE_OF_ENDER", &BlockRenderOptions{Size: 32, PackIds: []string{"emptypack"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rendered == nil || !hasOpaquePixels(rendered.Image) {
+		t.Fatal("vanilla SkyBlock item ID render did not produce visible pixels")
+	}
+	model := ""
+	if rendered.ResourceId.Model != nil {
+		model = *rendered.ResourceId.Model
+	}
+	if rendered.ResourceId.SourcePackId != "vanilla" || !strings.Contains(strings.ToLower(model), "eye_of_ender") {
+		t.Fatalf("resource did not resolve to vanilla eye of ender: source=%s model=%s textures=%v", rendered.ResourceId.SourcePackId, model, rendered.ResourceId.Textures)
+	}
+}
+
 func TestMissingSkyBlockCustomSkullReturnsError(t *testing.T) {
 	assetsRoot := createMinimalAssets(t)
 	packRoot := createEmptyPack(t, "emptypack")

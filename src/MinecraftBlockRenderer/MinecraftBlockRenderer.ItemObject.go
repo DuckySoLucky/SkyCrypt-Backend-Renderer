@@ -143,7 +143,13 @@ func (renderer *MinecraftBlockRenderer) prepareSkyBlockItemIDRender(skyBlockItem
 	}
 	target := "minecraft:player_head"
 	if len(effectiveOptions.PackIds) > 0 {
-		target = "firmskyblock:item/" + renderer.EncodeFirmamentId(skyBlockItemID)
+		encodedID := renderer.EncodeFirmamentId(skyBlockItemID)
+		if renderer.shouldRenderSkyBlockIDAsVanilla(encodedID, effectiveOptions) {
+			target = "minecraft:" + encodedID
+			effectiveOptions = renderer.withoutSkyBlockCustomData(effectiveOptions)
+		} else {
+			target = "firmskyblock:item/" + encodedID
+		}
 	}
 	return target, effectiveOptions, nil
 }
@@ -167,6 +173,21 @@ func (renderer *MinecraftBlockRenderer) resolvePackedSkyblockItemObjectName(norm
 	}
 	if strings.TrimSpace(options.CustomTextureFallbackItem) == "" {
 		options.CustomTextureFallbackItem = renderer.resolvePackedSkyblockFallbackItem(normalized, itemName)
+	}
+	encodedID := renderer.EncodeFirmamentId(normalized.SkyblockID)
+	if renderer.shouldRenderSkyBlockIDAsVanilla(encodedID, options) {
+		if strings.TrimSpace(normalized.ItemID) != "" {
+			return normalized.ItemID
+		}
+		if normalized.NumericID != nil {
+			if mapped, ok := legacyNumericItemID(*normalized.NumericID, normalized.Damage); ok {
+				return "minecraft:" + mapped
+			}
+		}
+		if strings.TrimSpace(normalized.ItemModel) != "" {
+			return normalized.ItemModel
+		}
+		return "minecraft:" + encodedID
 	}
 	return "firmskyblock:item/" + renderer.EncodeFirmamentId(normalized.SkyblockID)
 }
@@ -203,6 +224,10 @@ func (renderer *MinecraftBlockRenderer) normalizePackedSkyblockItemObjectOptions
 		return options
 	}
 
+	if renderer.shouldRenderSkyBlockIDAsVanilla(renderer.EncodeFirmamentId(normalized.SkyblockID), options) {
+		return renderer.withoutSkyBlockCustomData(options)
+	}
+
 	effectiveOptions := *options
 	itemData := *options.ItemData
 	if effectiveOptions.CustomTextureFallbackData == nil {
@@ -213,6 +238,57 @@ func (renderer *MinecraftBlockRenderer) normalizePackedSkyblockItemObjectOptions
 	itemData.Layer0Tint = nil
 	itemData.AdditionalLayerTints = nil
 	effectiveOptions.ItemData = &itemData
+	return &effectiveOptions
+}
+
+func (renderer *MinecraftBlockRenderer) shouldRenderSkyBlockIDAsVanilla(encodedID string, options *BlockRenderOptions) bool {
+	if renderer == nil || strings.TrimSpace(encodedID) == "" || options == nil || len(options.PackIds) == 0 {
+		return false
+	}
+	if renderer.hasPackedSkyBlockResource(encodedID, options) {
+		return false
+	}
+	return renderer.hasVanillaItem(encodedID)
+}
+
+func (renderer *MinecraftBlockRenderer) hasPackedSkyBlockResource(encodedID string, options *BlockRenderOptions) bool {
+	effective := MergeBlockRenderOptions(options)
+	packRenderer, _ := renderer.ResolveRendererForOptions(effective)
+	if packRenderer == nil {
+		packRenderer = renderer
+	}
+	if entry := packRenderer.getSkyblockItemDefinition(strings.ToLower(encodedID)); entry.Loaded {
+		return true
+	}
+	if packRenderer._modelResolver != nil {
+		if resolved, exists := packRenderer._modelResolver.TryResolve("firmskyblock:item/" + encodedID); exists && resolved != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func (renderer *MinecraftBlockRenderer) hasVanillaItem(encodedID string) bool {
+	if renderer == nil || renderer._itemRegistry == nil || strings.TrimSpace(encodedID) == "" {
+		return false
+	}
+	return renderer._itemRegistry.GetItemInfo(encodedID) != nil ||
+		renderer._itemRegistry.GetItemInfo("minecraft:"+encodedID) != nil
+}
+
+func (renderer *MinecraftBlockRenderer) withoutSkyBlockCustomData(options *BlockRenderOptions) *BlockRenderOptions {
+	if options == nil {
+		return nil
+	}
+	effectiveOptions := *options
+	effectiveOptions.CustomTextureFallbackItem = ""
+	effectiveOptions.CustomTextureFallbackData = nil
+	if options.ItemData != nil {
+		itemData := *options.ItemData
+		itemData.CustomData = nil
+		itemData.Profile = nil
+		effectiveOptions.ItemData = &itemData
+	}
 	return &effectiveOptions
 }
 
