@@ -167,6 +167,63 @@ func TestDefaultInventoryOrientationShowsFrontOnRight(t *testing.T) {
 	}
 }
 
+func TestGui3DItemOrientationShowsSouthEastCorner(t *testing.T) {
+	assetsRoot := createMinimalAssets(t)
+	writeJSON(t, assetsRoot, "items/oriented_cube.json", `{"model":{"model":"minecraft:item/oriented_cube"}}`)
+
+	faceColors := map[data.BlockFaceDirection]color.RGBA{
+		data.North: {R: 0xFF, G: 0x33, B: 0x33, A: 0xFF},
+		data.South: {R: 0x33, G: 0x99, B: 0xFF, A: 0xFF},
+		data.East:  {R: 0x33, G: 0xFF, B: 0x99, A: 0xFF},
+		data.West:  {R: 0x99, G: 0x33, B: 0xFF, A: 0xFF},
+		data.Up:    {R: 0xFF, G: 0xFF, B: 0x66, A: 0xFF},
+		data.Down:  {R: 0xFF, G: 0x99, B: 0x33, A: 0xFF},
+	}
+
+	for direction, c := range faceColors {
+		name := strings.ToLower(data.BlockFaceDirectionToString(direction))
+		writePNG(t, filepath.Join(assetsRoot, "textures", "block", "unit_test_gui_item_"+name+".png"), 16, 16, c)
+	}
+	writeJSON(t, assetsRoot, "models/item/oriented_cube.json", `{
+		"display":{"gui":{"rotation":[30,225,0],"translation":[0,0,0],"scale":[0.625,0.625,0.625]}},
+		"textures":{
+			"north":"minecraft:block/unit_test_gui_item_north",
+			"south":"minecraft:block/unit_test_gui_item_south",
+			"east":"minecraft:block/unit_test_gui_item_east",
+			"west":"minecraft:block/unit_test_gui_item_west",
+			"up":"minecraft:block/unit_test_gui_item_up",
+			"down":"minecraft:block/unit_test_gui_item_down"
+		},
+		"elements":[{"from":[0,0,0],"to":[16,16,16],"faces":{
+			"north":{"texture":"#north","uv":[0,0,16,16]},
+			"south":{"texture":"#south","uv":[0,0,16,16]},
+			"east":{"texture":"#east","uv":[0,0,16,16]},
+			"west":{"texture":"#west","uv":[0,0,16,16]},
+			"up":{"texture":"#up","uv":[0,0,16,16]},
+			"down":{"texture":"#down","uv":[0,0,16,16]}
+		}}]
+	}`)
+
+	renderer, err := CreateFromDataDirectory(assetsRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rendered := renderer.RenderGuiItemWithResourceId("oriented_cube", &BlockRenderOptions{Size: 160})
+	if rendered == nil || rendered.Image == nil || !hasOpaquePixels(rendered.Image) {
+		t.Fatal("oriented cube item render did not produce visible pixels")
+	}
+
+	img := rendered.Image
+	rightColor := sampleAverageColor(img, int(float64(img.Bounds().Dx())*0.70), int(float64(img.Bounds().Dx())*0.95), img.Bounds().Dy()/2-10, img.Bounds().Dy()/2+10)
+	leftColor := sampleAverageColor(img, int(float64(img.Bounds().Dx())*0.05), int(float64(img.Bounds().Dx())*0.30), img.Bounds().Dy()/2-10, img.Bounds().Dy()/2+10)
+	topColor := sampleAverageColor(img, img.Bounds().Dx()/2-10, img.Bounds().Dx()/2+10, int(float64(img.Bounds().Dy())*0.05), int(float64(img.Bounds().Dy())*0.25))
+
+	assertClosestFaceColor(t, "right face", rightColor, data.East, faceColors)
+	assertClosestFaceColor(t, "left face", leftColor, data.South, faceColors)
+	assertClosestFaceColor(t, "top face", topColor, data.Up, faceColors)
+}
+
 func sampleAverageColor(img *image.RGBA, minX, maxX, minY, maxY int) color.RGBA {
 	var r, g, b, a, count uint64
 	bounds := img.Bounds()
@@ -191,6 +248,24 @@ func sampleAverageColor(img *image.RGBA, minX, maxX, minY, maxY int) color.RGBA 
 		return color.RGBA{}
 	}
 	return color.RGBA{R: uint8(r / count), G: uint8(g / count), B: uint8(b / count), A: uint8(a / count)}
+}
+
+func assertClosestFaceColor(t *testing.T, label string, actual color.RGBA, want data.BlockFaceDirection, faceColors map[data.BlockFaceDirection]color.RGBA) {
+	t.Helper()
+
+	bestDirection := data.BlockFaceDirection(-1)
+	bestDistance := math.Inf(1)
+	for direction, candidate := range faceColors {
+		distance := colorDistance(actual, candidate)
+		if distance < bestDistance {
+			bestDirection = direction
+			bestDistance = distance
+		}
+	}
+
+	if bestDirection != want {
+		t.Fatalf("%s color=%+v closest to %s, want %s", label, actual, data.BlockFaceDirectionToString(bestDirection), data.BlockFaceDirectionToString(want))
+	}
 }
 
 func closerColor(actual, expected, other color.RGBA) bool {

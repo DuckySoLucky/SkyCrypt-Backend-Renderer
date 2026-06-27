@@ -22,7 +22,7 @@ import (
 
 var VanillaPackId = "vanilla"
 
-var RendererVersion = "0.1.5"
+var RendererVersion = "0.1.6"
 
 type ItemRenderCapture struct {
 	OriginalTarget      string
@@ -32,6 +32,7 @@ type ItemRenderCapture struct {
 	ModelCandidates     []string
 	ResolvedModelName   *string
 	CompositeModelNames []string
+	SpecialModel        *data.ItemSpecialModelInfo
 	FinalOptions        *BlockRenderOptions
 }
 
@@ -55,6 +56,7 @@ func (r *ItemRenderCapture) ToResolution() *ItemModelResolution {
 		ModelCandidates:     r.ModelCandidates,
 		ResolvedModelName:   r.ResolvedModelName,
 		CompositeModelNames: r.CompositeModelNames,
+		SpecialModel:        r.SpecialModel,
 	}
 }
 
@@ -438,19 +440,21 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) ComputeResourceIdInternal
 		var modelCandidates []string = nil
 		var resolvedModelName *string = nil
 		var compositeModelNames []string = nil
+		var specialModel *data.ItemSpecialModelInfo = nil
 
 		if preResolvedItem != nil && strings.EqualFold(preResolvedItem.LookupTarget, lookupTarget) {
 			effectiveModel = preResolvedItem.Model
 			modelCandidates = preResolvedItem.ModelCandidates
 			resolvedModelName = preResolvedItem.ResolvedModelName
 			compositeModelNames = preResolvedItem.CompositeModelNames
+			specialModel = preResolvedItem.SpecialModel
 			if preResolvedItem.ItemInfo != nil {
 				info = preResolvedItem.ItemInfo
 			}
 		} else {
 			// Always use ResolveItemModel for consistent resolution logic
 			// (it handles selectors, Firmament models, and all other item model types)
-			effectiveModel, modelCandidates, resolvedModelName, compositeModelNames = _minecraftBlockRenderer.ResolveItemModel(lookupTarget, info, options)
+			effectiveModel, modelCandidates, resolvedModelName, compositeModelNames, specialModel = _minecraftBlockRenderer.ResolveItemModel(lookupTarget, info, options)
 		}
 
 		effectiveModelIdentifier = resolvedModelName
@@ -502,6 +506,21 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) ComputeResourceIdInternal
 			}
 		} else if info != nil && info.Texture != nil {
 			resolvedTextures[*info.Texture] = struct{}{}
+		}
+
+		if specialModel != nil && strings.EqualFold(specialModel.Type, "minecraft:chest") {
+			if chestTexture := specialChestEntityTexture(specialModel.Texture); chestTexture != "" {
+				texture := _minecraftBlockRenderer._textureRepository.GetTexture(chestTexture)
+				if texture != nil && !_minecraftBlockRenderer._textureRepository.IsMissingTexture(texture) {
+					resolvedTextures = map[string]struct{}{
+						chestTexture: {},
+					}
+					marker := specialModelResourceMarker(specialModel)
+					modelPath = &marker
+					primaryModelIdentifier = &marker
+					referenceModel = &marker
+				}
+			}
 		}
 
 		if options.ItemData != nil && options.ItemData.CustomData != nil {
@@ -623,6 +642,7 @@ type ItemModelResolution struct {
 	ModelCandidates     []string
 	ResolvedModelName   *string
 	CompositeModelNames []string
+	SpecialModel        *data.ItemSpecialModelInfo
 }
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) CollectResolvedTextures(model *data.BlockModelInstance) []string {

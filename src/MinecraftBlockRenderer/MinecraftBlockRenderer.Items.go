@@ -5,11 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src"
-	nbt "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/NBT"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/global"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/imagecache"
 	"image"
 	"image/color"
 	imagedraw "image/draw"
@@ -21,6 +16,12 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src"
+	nbt "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/NBT"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/global"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/imagecache"
 
 	"golang.org/x/image/draw"
 )
@@ -41,6 +42,8 @@ var InventoryModelSuffixes = map[string]string{
 var BannerSuffixes = []string{
 	"_banner",
 }
+
+const inventory3DItemGuiYawCorrection = 90.0
 
 var LegacyDefaultTintLayerOverrides = map[string][]int{
 	"wolf_armor_dyed": {1},
@@ -128,7 +131,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderGuiItemInternal(ite
 		capture.ItemInfo = itemInfo
 	}
 
-	model, candidates, resolvedModelName, compositeModelNames := _minecraftBlockRenderer.ResolveItemModel(normalizedItemKey, itemInfo, *options)
+	model, candidates, resolvedModelName, compositeModelNames, specialModel := _minecraftBlockRenderer.ResolveItemModel(normalizedItemKey, itemInfo, *options)
 	// Console.WriteLine($"Resolved model for item '{itemName}': '{model?.Name}' with candidates [{string.Join(", ", modelCandidates)}].");
 	_ = candidates
 
@@ -137,6 +140,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderGuiItemInternal(ite
 		capture.ModelCandidates = candidates
 		capture.ResolvedModelName = resolvedModelName
 		capture.CompositeModelNames = compositeModelNames
+		capture.SpecialModel = specialModel
 	}
 
 	if _minecraftBlockRenderer.IsBannerItem(normalizedItemKey) || (resolvedModelName != nil && _minecraftBlockRenderer.IsBannerItem(*resolvedModelName)) {
@@ -175,6 +179,10 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderGuiItemInternal(ite
 
 	// fmt.Printf("\nnormalizedItemKey: %v\nitemInfo: %v\nmodel: %v\noptions: %v\n", normalizedItemKey, itemInfo, model, options)
 
+	if specialRender := _minecraftBlockRenderer.TryRenderSpecialChestItem(specialModel, model, *options); specialRender != nil {
+		return finalizeGuiResult(specialRender)
+	}
+
 	flatRender := _minecraftBlockRenderer.TryRenderGuiTextureLayers(itemName, itemInfo, model, *options)
 	if flatRender != nil {
 		return finalizeGuiResult(flatRender)
@@ -202,7 +210,8 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderGuiItemInternal(ite
 
 	if model != nil && len(model.Elements) > 0 {
 		if !_minecraftBlockRenderer.ModelUsesMissingTexturePlaceholder(model) {
-			rendered := _minecraftBlockRenderer.RenderModel(model, *options, &itemName)
+			renderOptions := _minecraftBlockRenderer.applyInventory3DItemGuiOrientation(model, *options)
+			rendered := _minecraftBlockRenderer.RenderModel(model, renderOptions, &itemName)
 			if rendered != nil {
 				return finalizeGuiResult(rendered)
 			}
@@ -225,10 +234,11 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) DetermineDisplayContext(o
 	return "none"
 }
 
-func (_minecraftBlockRenderer *MinecraftBlockRenderer) ResolveItemModel(itemName string, itemInfo *data.ItemInfo, options BlockRenderOptions) (*data.BlockModelInstance, []string, *string, []string) {
+func (_minecraftBlockRenderer *MinecraftBlockRenderer) ResolveItemModel(itemName string, itemInfo *data.ItemInfo, options BlockRenderOptions) (*data.BlockModelInstance, []string, *string, []string, *data.ItemSpecialModelInfo) {
 	displayContext := _minecraftBlockRenderer.DetermineDisplayContext(options)
 	var dynamicModel *string
 	var dynamicModels []string
+	var specialModel *data.ItemSpecialModelInfo
 	if itemInfo != nil && itemInfo.Selector != nil {
 		selectorContext := data.ItemModelContext{
 			ItemData:       options.ItemData,
@@ -237,6 +247,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) ResolveItemModel(itemName
 			ItemModel:      itemModelForSelectorContext(options.ItemData),
 		}
 		dynamicModels = compactModelNames(data.ResolveAllItemModelSelector(itemInfo.Selector, selectorContext))
+		specialModel = data.ResolveItemModelSelectorSpecialInfo(itemInfo.Selector, selectorContext)
 		if len(dynamicModels) > 0 {
 			dynamicModel = &dynamicModels[0]
 		}
@@ -329,7 +340,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) ResolveItemModel(itemName
 	}
 
 	compositeModelNames := _minecraftBlockRenderer.ResolveCompositeModelNames(resolvedModelName, skyblockItemModels, dynamicModels)
-	return model, candidates, resolvedModelName, compositeModelNames
+	return model, candidates, resolvedModelName, compositeModelNames, specialModel
 }
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) ResolveCompositeModelNames(resolvedModelName *string, skyblockItemModels []string, dynamicModels []string) []string {
@@ -401,7 +412,8 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryRenderCompositeItemMod
 		}
 		if layer == nil && len(model.Elements) > 0 {
 			if !_minecraftBlockRenderer.ModelUsesMissingTexturePlaceholder(model) {
-				layer = _minecraftBlockRenderer.RenderModel(model, childOptions, &itemName)
+				renderOptions := _minecraftBlockRenderer.applyInventory3DItemGuiOrientation(model, childOptions)
+				layer = _minecraftBlockRenderer.RenderModel(model, renderOptions, &itemName)
 			}
 		}
 		if layer == nil {
@@ -423,6 +435,146 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryRenderCompositeItemMod
 	}
 
 	return canvas
+}
+
+func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryRenderSpecialChestItem(special *data.ItemSpecialModelInfo, baseModel *data.BlockModelInstance, options BlockRenderOptions) *image.RGBA {
+	if special == nil || !strings.EqualFold(special.Type, "minecraft:chest") {
+		return nil
+	}
+
+	textureID := specialChestEntityTexture(special.Texture)
+	if textureID == "" {
+		return nil
+	}
+	texture := _minecraftBlockRenderer._textureRepository.GetTexture(textureID)
+	if texture == nil || _minecraftBlockRenderer._textureRepository.IsMissingTexture(texture) {
+		return nil
+	}
+
+	textures := _minecraftBlockRenderer.CloneTextureDictionary(baseModel)
+	textures["chest"] = textureID
+	textures["particle"] = textureID
+
+	displaySource := baseModel
+	templateChest := "item/template_chest"
+	if template := _minecraftBlockRenderer.ResolveModelOrNull(&templateChest); template != nil {
+		displaySource = template
+	}
+	display := _minecraftBlockRenderer.CloneDisplayDictionary(displaySource)
+
+	renderOptions := options
+	if guiTransform, ok := display["gui"]; ok {
+		renderOptions.OverrideGuiTransform = guiTransform
+	}
+
+	modelName := specialModelResourceMarker(special)
+	chestModel := data.BlockModelInstance{
+		Name:     modelName,
+		Textures: textures,
+		Display:  display,
+		Elements: specialChestElements(),
+	}
+
+	renderOptions = _minecraftBlockRenderer.applySpecialChestItemGuiOrientation(&chestModel, renderOptions)
+	rendered := _minecraftBlockRenderer.RenderModel(&chestModel, renderOptions, &modelName)
+	if rendered == nil || !hasVisiblePixels(rendered) {
+		return nil
+	}
+	return rendered
+}
+
+func specialChestElements() []data.ModelElement {
+	return []data.ModelElement{
+		chestElement(
+			data.Vector3{X: 1, Y: 0, Z: 1},
+			data.Vector3{X: 15, Y: 10, Z: 15},
+			map[data.BlockFaceDirection]data.ModelFace{
+				data.Down:  chestFace(data.Vector4{X: 3.5, Y: 4.75, Z: 7, W: 8.25}, intPtr(180)),
+				data.North: chestFace(data.Vector4{X: 10.5, Y: 8.25, Z: 14, W: 10.75}, intPtr(180)),
+				data.East:  chestFace(data.Vector4{X: 0, Y: 8.25, Z: 3.5, W: 10.75}, intPtr(180)),
+				data.South: chestFace(data.Vector4{X: 3.5, Y: 8.25, Z: 7, W: 10.75}, intPtr(180)),
+				data.West:  chestFace(data.Vector4{X: 7, Y: 8.25, Z: 10.5, W: 10.75}, intPtr(180)),
+			},
+		),
+		chestElement(
+			data.Vector3{X: 1, Y: 10, Z: 1},
+			data.Vector3{X: 15, Y: 14, Z: 15},
+			map[data.BlockFaceDirection]data.ModelFace{
+				data.Up:    chestFace(data.Vector4{X: 3.5, Y: 4.75, Z: 7, W: 8.25}, nil),
+				data.North: chestFace(data.Vector4{X: 10.5, Y: 3.75, Z: 14, W: 4.75}, intPtr(180)),
+				data.East:  chestFace(data.Vector4{X: 0, Y: 3.75, Z: 3.5, W: 4.75}, intPtr(180)),
+				data.South: chestFace(data.Vector4{X: 3.5, Y: 3.75, Z: 7, W: 4.75}, intPtr(180)),
+				data.West:  chestFace(data.Vector4{X: 7, Y: 3.75, Z: 10.5, W: 4.75}, intPtr(180)),
+			},
+		),
+		chestElement(
+			data.Vector3{X: 7, Y: 7, Z: 0},
+			data.Vector3{X: 9, Y: 11, Z: 1},
+			map[data.BlockFaceDirection]data.ModelFace{
+				data.Down:  chestFace(data.Vector4{X: 0.25, Y: 0, Z: 0.75, W: 0.25}, intPtr(180)),
+				data.Up:    chestFace(data.Vector4{X: 0.75, Y: 0, Z: 1.25, W: 0.25}, intPtr(180)),
+				data.North: chestFace(data.Vector4{X: 1, Y: 0.25, Z: 1.5, W: 1.25}, intPtr(180)),
+				data.West:  chestFace(data.Vector4{X: 0.75, Y: 0.25, Z: 1, W: 1.25}, intPtr(180)),
+				data.East:  chestFace(data.Vector4{X: 0, Y: 0.25, Z: 0.25, W: 1.25}, intPtr(180)),
+			},
+		),
+	}
+}
+
+func chestElement(from data.Vector3, to data.Vector3, faces map[data.BlockFaceDirection]data.ModelFace) data.ModelElement {
+	return data.ModelElement{
+		From:  from,
+		To:    to,
+		Shade: true,
+		Faces: faces,
+	}
+}
+
+func chestFace(uv data.Vector4, rotation *int) data.ModelFace {
+	return data.ModelFace{
+		Texture:  "#chest",
+		Uv:       &uv,
+		Rotation: rotation,
+	}
+}
+
+func intPtr(value int) *int {
+	return &value
+}
+
+func specialChestEntityTexture(texture string) string {
+	switch strings.ToLower(strings.TrimSpace(texture)) {
+	case "minecraft:normal", "normal", "":
+		return "minecraft:entity/chest/normal"
+	case "minecraft:trapped", "trapped":
+		return "minecraft:entity/chest/trapped"
+	case "minecraft:ender", "ender":
+		return "minecraft:entity/chest/ender"
+	case "minecraft:christmas", "christmas":
+		return "minecraft:entity/chest/christmas"
+	case "minecraft:copper", "copper":
+		return "minecraft:entity/chest/copper"
+	case "minecraft:copper_exposed", "copper_exposed":
+		return "minecraft:entity/chest/copper_exposed"
+	case "minecraft:copper_weathered", "copper_weathered":
+		return "minecraft:entity/chest/copper_weathered"
+	case "minecraft:copper_oxidized", "copper_oxidized":
+		return "minecraft:entity/chest/copper_oxidized"
+	default:
+		return ""
+	}
+}
+
+func specialModelResourceMarker(special *data.ItemSpecialModelInfo) string {
+	if special == nil {
+		return ""
+	}
+	specialType := strings.TrimSpace(special.Type)
+	texture := strings.TrimSpace(special.Texture)
+	if texture == "" {
+		texture = "minecraft:normal"
+	}
+	return fmt.Sprintf("special:%s:%s:%s", specialType, texture, strings.TrimSpace(special.BaseModel))
 }
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) GetFirmamentModel(itemData *data.ItemRenderData) *string {
@@ -634,8 +786,10 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) getSkyblockItemDefinition
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) loadSkyblockItemDefinition(encodedId string) skyblockItemDefinitionCacheEntry {
 	direct := "assets/skyblock/items/" + strings.ToLower(encodedId) + ".json"
+	firmamentDirect := "assets/firmskyblock/items/" + strings.ToLower(encodedId) + ".json"
 	fileName := strings.ToLower(encodedId) + ".json"
 	suffix := "/" + direct
+	firmamentSuffix := "/" + firmamentDirect
 
 	for packIndex := len(_minecraftBlockRenderer._packContext.Packs) - 1; packIndex >= 0; packIndex-- {
 		pack := _minecraftBlockRenderer._packContext.Packs[packIndex]
@@ -646,8 +800,17 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) loadSkyblockItemDefinitio
 		candidates := []string{}
 		if pack.Provider.FileExists(direct) {
 			candidates = append(candidates, direct)
-		} else if files, err := pack.Provider.EnumerateFiles("assets/skyblock/items", fileName, true); err == nil {
-			candidates = append(candidates, files...)
+		}
+		if pack.Provider.FileExists(firmamentDirect) {
+			candidates = append(candidates, firmamentDirect)
+		}
+		if len(candidates) == 0 {
+			if files, err := pack.Provider.EnumerateFiles("assets/skyblock/items", fileName, true); err == nil {
+				candidates = append(candidates, files...)
+			}
+			if files, err := pack.Provider.EnumerateFiles("assets/firmskyblock/items", fileName, true); err == nil {
+				candidates = append(candidates, files...)
+			}
 		}
 		if len(candidates) == 0 {
 			files, err := pack.Provider.EnumerateFiles("", fileName, true)
@@ -656,7 +819,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) loadSkyblockItemDefinitio
 			}
 			for _, file := range files {
 				lower := strings.ToLower(strings.ReplaceAll(file, "\\", "/"))
-				if lower == fileName || lower == direct || strings.HasSuffix(lower, suffix) || strings.HasSuffix(lower, "/"+fileName) {
+				if lower == direct || lower == firmamentDirect || strings.HasSuffix(lower, suffix) || strings.HasSuffix(lower, firmamentSuffix) {
 					candidates = append(candidates, file)
 				}
 			}
@@ -1021,6 +1184,31 @@ func cloneTransformWithYawOffset(source *data.TransformDefinition, yawOffset flo
 		Translation: &translation,
 		Scale:       &scale,
 	}
+}
+
+func (_minecraftBlockRenderer *MinecraftBlockRenderer) applyInventory3DItemGuiOrientation(model *data.BlockModelInstance, options BlockRenderOptions) BlockRenderOptions {
+	return _minecraftBlockRenderer.applyGuiYawCorrection(model, options, inventory3DItemGuiYawCorrection)
+}
+
+func (_minecraftBlockRenderer *MinecraftBlockRenderer) applySpecialChestItemGuiOrientation(model *data.BlockModelInstance, options BlockRenderOptions) BlockRenderOptions {
+	return _minecraftBlockRenderer.applyGuiYawCorrection(model, options, -inventory3DItemGuiYawCorrection-90)
+}
+
+func (_minecraftBlockRenderer *MinecraftBlockRenderer) applyGuiYawCorrection(model *data.BlockModelInstance, options BlockRenderOptions, yawCorrection float64) BlockRenderOptions {
+	if options.OverrideGuiTransform == nil && !options.UseGuiTransform {
+		return options
+	}
+
+	source := options.OverrideGuiTransform
+	if source == nil && options.UseGuiTransform && model != nil {
+		source = model.GetDisplayTransform("gui")
+	}
+	if source == nil {
+		source = DefaultGuiTransform
+	}
+
+	options.OverrideGuiTransform = cloneTransformWithYawOffset(source, yawCorrection)
+	return options
 }
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) IsPlayerHeadCandidate(itemName string, model *data.BlockModelInstance, modelCandidates []string) bool {
@@ -2650,10 +2838,12 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryRenderBlockItem(blockN
 			modelName = mappedModel
 		}
 	}
-	if _, found := _minecraftBlockRenderer._modelResolver.TryResolve(modelName); !found {
+	model, found := _minecraftBlockRenderer._modelResolver.TryResolve(modelName)
+	if !found {
 		return nil
 	}
 
+	options = _minecraftBlockRenderer.applyInventory3DItemGuiOrientation(model, options)
 	rendered := _minecraftBlockRenderer.RenderBlock(blockName, options)
 	if rendered == nil || !hasVisiblePixels(rendered) {
 		return nil

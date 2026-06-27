@@ -34,6 +34,12 @@ type ItemModelSelector interface {
 	Resolve(context ItemModelContext) *string
 }
 
+type ItemSpecialModelInfo struct {
+	Type      string
+	BaseModel string
+	Texture   string
+}
+
 func ResolveAllItemModelSelector(selector ItemModelSelector, context ItemModelContext) []string {
 	if selector == nil {
 		return nil
@@ -139,6 +145,78 @@ func ResolveAllItemModelSelector(selector ItemModelSelector, context ItemModelCo
 		return typed.resolveAll(context)
 	default:
 		return oneResolvedModel(selector.Resolve(context))
+	}
+}
+
+func ResolveItemModelSelectorSpecialInfo(selector ItemModelSelector, context ItemModelContext) *ItemSpecialModelInfo {
+	if selector == nil {
+		return nil
+	}
+
+	switch typed := selector.(type) {
+	case *ItemModelSelectorSpecial:
+		if typed.Nested != nil {
+			if nested := ResolveItemModelSelectorSpecialInfo(typed.Nested, context); nested != nil {
+				return nested
+			}
+		}
+		return typed.Special
+	case *ItemModelSelectorComposite:
+		for _, child := range typed.Selectors {
+			if info := ResolveItemModelSelectorSpecialInfo(child, context); info != nil {
+				return info
+			}
+		}
+		return nil
+	case *ItemModelSelectorCondition:
+		if typed.evaluateCondition(context) {
+			return ResolveItemModelSelectorSpecialInfo(typed.OnTrue, context)
+		}
+		return ResolveItemModelSelectorSpecialInfo(typed.OnFalse, context)
+	case *ItemModelSelectorSelect:
+		for _, selectCase := range typed.Cases {
+			if !typed.matches(selectCase.When, context) || selectCase.Selector == nil {
+				continue
+			}
+			if info := ResolveItemModelSelectorSpecialInfo(selectCase.Selector, context); info != nil {
+				return info
+			}
+			if resolved := selectCase.Selector.Resolve(context); resolved != nil && strings.TrimSpace(*resolved) != "" {
+				return nil
+			}
+		}
+		if typed.shouldResolveFirstCaseOnUnsupportedSelector() || typed.shouldResolveFirstCaseOnMissingItemModel(context) {
+			if len(typed.Cases) > 0 {
+				return ResolveItemModelSelectorSpecialInfo(typed.Cases[0].Selector, context)
+			}
+		}
+		return ResolveItemModelSelectorSpecialInfo(typed.Fallback, context)
+	case *ItemModelSelectorRangeDispatch:
+		value := typed.getPropertyValue(context)
+		if value == nil {
+			if typed.shouldResolveFirstEntryOnUnsupportedSelector() && len(typed.Entries) > 0 {
+				return ResolveItemModelSelectorSpecialInfo(typed.Entries[0].Selector, context)
+			}
+			return ResolveItemModelSelectorSpecialInfo(typed.Fallback, context)
+		}
+
+		var matchedEntry *RangeDispatchEntry
+		for index := range typed.Entries {
+			entry := &typed.Entries[index]
+			if *value >= entry.Threshold {
+				if matchedEntry == nil || entry.Threshold > matchedEntry.Threshold {
+					matchedEntry = entry
+				}
+			}
+		}
+		if matchedEntry != nil {
+			return ResolveItemModelSelectorSpecialInfo(matchedEntry.Selector, context)
+		}
+		return ResolveItemModelSelectorSpecialInfo(typed.Fallback, context)
+	case *ItemModelSelectorOptimized:
+		return typed.resolveSpecialInfo(context)
+	default:
+		return nil
 	}
 }
 
@@ -288,12 +366,18 @@ func (s *ItemModelSelectorModel) Resolve(context ItemModelContext) *string {
 type ItemModelSelectorSpecial struct {
 	BaseModel *string
 	Nested    ItemModelSelector
+	Special   *ItemSpecialModelInfo
 }
 
 func NewItemModelSelectorSpecial(baseModel string, nested ItemModelSelector) *ItemModelSelectorSpecial {
+	return NewItemModelSelectorSpecialWithInfo(baseModel, nested, nil)
+}
+
+func NewItemModelSelectorSpecialWithInfo(baseModel string, nested ItemModelSelector, special *ItemSpecialModelInfo) *ItemModelSelectorSpecial {
 	return &ItemModelSelectorSpecial{
 		BaseModel: trimToPointer(baseModel),
 		Nested:    nested,
+		Special:   special,
 	}
 }
 
@@ -996,6 +1080,47 @@ func (s *ItemModelSelectorOptimized) CustomDataMappingCount() int {
 	return len(s.customDataIDToModel) + len(s.customDataIDToSelector) + len(s.compositeMappings)
 }
 
+func (s *ItemModelSelectorOptimized) resolveSpecialInfo(context ItemModelContext) *ItemSpecialModelInfo {
+	if s == nil {
+		return nil
+	}
+
+	if context.ItemData != nil && context.ItemData.CustomData != nil {
+		customData := context.ItemData.CustomData
+		customDataKey := ""
+
+		if id := tryGetString(customData, "id"); id != nil && strings.TrimSpace(*id) != "" {
+			customDataKey = *id
+		} else if model := tryGetString(customData, "model"); model != nil && strings.TrimSpace(*model) != "" {
+			customDataKey = *model
+		}
+
+		if customDataKey != "" {
+			if selector, ok := s.customDataIDToSelector[customDataKey]; ok && selector != nil {
+				return ResolveItemModelSelectorSpecialInfo(selector, context)
+			}
+			if _, ok := s.customDataIDToModel[customDataKey]; ok {
+				return nil
+			}
+		}
+	}
+
+	if context.ItemData != nil && context.ItemData.CustomData != nil && len(s.compositeMappings) > 0 {
+		compositeCustomData := context.ItemData.CustomData
+		for _, mapping := range s.compositeMappings {
+			if !matchesComposite(compositeCustomData, mapping.ExpectedValues) {
+				continue
+			}
+			if mapping.Selector != nil {
+				return ResolveItemModelSelectorSpecialInfo(mapping.Selector, context)
+			}
+			return nil
+		}
+	}
+
+	return ResolveItemModelSelectorSpecialInfo(s.fallbackSelector, context)
+}
+
 func matchesComposite(customData *nbt.NbtCompound, expected map[string]string) bool {
 	for key, value := range expected {
 		if !TryMatchCustomDataValue(customData, key, value) {
@@ -1328,7 +1453,8 @@ func parseItemModelSelector(element any, depth int) ItemModelSelector {
 			if nestedElement, okNested := obj["model"]; okNested {
 				nested = parseItemModelSelector(nestedElement, depth+1)
 			}
-			return NewItemModelSelectorSpecial(getString(obj, "base"), nested)
+			base := getString(obj, "base")
+			return NewItemModelSelectorSpecialWithInfo(base, nested, parseItemSpecialModelInfo(base, obj["model"]))
 		case "condition":
 			return parseCondition(obj, depth+1)
 		case "select":
@@ -1421,6 +1547,25 @@ func parseCondition(element map[string]any, depth int) ItemModelSelector {
 		ValueLiteral:    valueLiteral,
 		OnTrue:          onTrue,
 		OnFalse:         onFalse,
+	}
+}
+
+func parseItemSpecialModelInfo(baseModel string, element any) *ItemSpecialModelInfo {
+	obj, ok := element.(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	typeValue := getString(obj, "type")
+	if strings.TrimSpace(typeValue) == "" {
+		return nil
+	}
+
+	texture := getString(obj, "texture")
+	return &ItemSpecialModelInfo{
+		Type:      normalizeNamespacedValue(typeValue),
+		BaseModel: strings.TrimSpace(baseModel),
+		Texture:   normalizeNamespacedValue(texture),
 	}
 }
 
@@ -1627,6 +1772,17 @@ func normalizeSelectorType(value string) string {
 	}
 
 	return strings.ToLower(typeValue)
+}
+
+func normalizeNamespacedValue(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	if strings.Contains(trimmed, ":") {
+		return strings.ToLower(trimmed)
+	}
+	return "minecraft:" + strings.ToLower(trimmed)
 }
 
 func trimToPointer(value string) *string {
