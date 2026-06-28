@@ -4,16 +4,19 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	mbr "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/MinecraftBlockRenderer"
 	nbt "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/NBT"
 	texturepacks "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/TexturePacks"
 	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/global"
 	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/imagecache"
 )
 
@@ -28,6 +31,7 @@ type Options struct {
 	Size              int
 	Preload           bool
 	CacheDir          string
+	VerboseLogging    bool
 }
 
 type RenderedItem struct {
@@ -36,8 +40,10 @@ type RenderedItem struct {
 }
 
 type PreRenderOptions struct {
-	Workers   int
-	Overwrite bool
+	Workers        int
+	Overwrite      bool
+	ShowProgress   bool
+	ProgressWriter io.Writer
 }
 
 type PreRenderedItem struct {
@@ -85,6 +91,8 @@ func NewRenderer(options Options) (*Renderer, error) {
 }
 
 func NewRendererWithOptions(options Options) (*Renderer, error) {
+	global.SetVerboseLogging(options.VerboseLogging)
+
 	if options.AssetsRoot == "" {
 		return nil, fmt.Errorf("assets root is required")
 	}
@@ -215,6 +223,7 @@ func (r *Renderer) PreRenderSkyBlockItemIDs(ctx context.Context, ids []string, o
 	result := &PreRenderResult{
 		Entries: make([]PreRenderedItem, len(ids)),
 	}
+	initialFailed := 0
 	indexesByID := make(map[string][]int)
 	uniqueIDs := make([]string, 0, len(ids))
 	for index, id := range ids {
@@ -222,6 +231,7 @@ func (r *Renderer) PreRenderSkyBlockItemIDs(ctx context.Context, ids []string, o
 		result.Entries[index] = PreRenderedItem{InputID: id}
 		if trimmed == "" {
 			result.Entries[index].Error = "skyBlockItemID cannot be empty"
+			initialFailed++
 			continue
 		}
 		if _, exists := indexesByID[trimmed]; !exists {
@@ -241,6 +251,9 @@ func (r *Renderer) PreRenderSkyBlockItemIDs(ctx context.Context, ids []string, o
 	results := make(chan renderResult)
 	workerCount := minInt(workers, maxInt(1, len(uniqueIDs)))
 	var wg sync.WaitGroup
+	progress := newPreRenderProgressReporter(options, len(ids), workerCount)
+	progress.addInitialFailures(initialFailed)
+	progress.start()
 
 	renderOne := func(id string) renderResult {
 		if err := ctx.Err(); err != nil {
@@ -280,21 +293,10 @@ func (r *Renderer) PreRenderSkyBlockItemIDs(ctx context.Context, ids []string, o
 	}()
 
 	completedByID := make(map[string]renderResult)
-	for rendered := range results {
+	applyRenderResult := func(rendered renderResult) {
 		completedByID[rendered.inputID] = rendered
-	}
-
-	cancelErr := ctx.Err()
-	for _, id := range uniqueIDs {
-		rendered, completed := completedByID[id]
-		if !completed {
-			rendered = renderResult{inputID: id, err: cancelErr}
-			if rendered.err == nil {
-				rendered.err = context.Canceled
-			}
-		}
-
-		for _, index := range indexesByID[id] {
+		indexes := indexesByID[rendered.inputID]
+		for _, index := range indexes {
 			entry := result.Entries[index]
 			if rendered.item != nil {
 				entry.Path = rendered.item.Path
@@ -305,6 +307,23 @@ func (r *Renderer) PreRenderSkyBlockItemIDs(ctx context.Context, ids []string, o
 			}
 			entry.Skipped = rendered.skipped
 			result.Entries[index] = entry
+		}
+		progress.addResult(rendered.inputID, len(indexes), rendered.err != nil, rendered.skipped, rendered.item != nil)
+	}
+
+	for rendered := range results {
+		applyRenderResult(rendered)
+	}
+
+	cancelErr := ctx.Err()
+	for _, id := range uniqueIDs {
+		_, completed := completedByID[id]
+		if !completed {
+			rendered := renderResult{inputID: id, err: cancelErr}
+			if rendered.err == nil {
+				rendered.err = context.Canceled
+			}
+			applyRenderResult(rendered)
 		}
 	}
 
@@ -318,10 +337,185 @@ func (r *Renderer) PreRenderSkyBlockItemIDs(ctx context.Context, ids []string, o
 		}
 	}
 
+	progress.finish(cancelErr != nil)
+
 	if cancelErr != nil {
 		return result, cancelErr
 	}
 	return result, nil
+}
+
+const (
+	preRenderProgressBarWidth      = 32
+	preRenderProgressRedrawMinimum = 250 * time.Millisecond
+)
+
+type preRenderProgressReporter struct {
+	writer    io.Writer
+	total     int
+	workers   int
+	started   time.Time
+	lastDraw  time.Time
+	completed int
+	succeeded int
+	skipped   int
+	failed    int
+	current   string
+}
+
+func newPreRenderProgressReporter(options PreRenderOptions, total int, workers int) *preRenderProgressReporter {
+	if !options.ShowProgress {
+		return nil
+	}
+
+	writer := options.ProgressWriter
+	if writer == nil {
+		writer = os.Stderr
+	}
+
+	return &preRenderProgressReporter{
+		writer:  writer,
+		total:   total,
+		workers: workers,
+		started: time.Now(),
+	}
+}
+
+func (p *preRenderProgressReporter) addInitialFailures(count int) {
+	if p == nil || count <= 0 {
+		return
+	}
+	p.completed += count
+	p.failed += count
+}
+
+func (p *preRenderProgressReporter) start() {
+	if p == nil {
+		return
+	}
+	p.draw("", true)
+}
+
+func (p *preRenderProgressReporter) addResult(current string, entries int, failed bool, skipped bool, succeeded bool) {
+	if p == nil || entries <= 0 {
+		return
+	}
+
+	p.completed += entries
+	p.current = current
+	if failed {
+		p.failed += entries
+	} else if skipped {
+		p.skipped += entries
+	} else if succeeded {
+		p.succeeded += entries
+	}
+
+	if time.Since(p.lastDraw) >= preRenderProgressRedrawMinimum {
+		p.draw("", false)
+	}
+}
+
+func (p *preRenderProgressReporter) finish(canceled bool) {
+	if p == nil {
+		return
+	}
+
+	status := "done"
+	if canceled {
+		status = "canceled"
+	}
+	p.current = ""
+	p.draw(status, true)
+	fmt.Fprintln(p.writer)
+}
+
+func (p *preRenderProgressReporter) draw(status string, force bool) {
+	if p == nil || p.writer == nil {
+		return
+	}
+	now := time.Now()
+	if !force && !p.lastDraw.IsZero() && now.Sub(p.lastDraw) < preRenderProgressRedrawMinimum {
+		return
+	}
+	p.lastDraw = now
+
+	prefix := "pre-render"
+	if status != "" {
+		prefix += " " + status
+	}
+
+	completed := p.completed
+	total := p.total
+	if total > 0 && completed > total {
+		completed = total
+	}
+
+	percent := 100.0
+	if total > 0 {
+		percent = float64(completed) / float64(total) * 100
+	}
+
+	parts := []string{
+		fmt.Sprintf("\r%s [%s]", prefix, preRenderProgressBar(completed, total)),
+		fmt.Sprintf("%d/%d", completed, total),
+		fmt.Sprintf("%.1f%%", percent),
+		fmt.Sprintf("ok=%d", p.succeeded),
+		fmt.Sprintf("skipped=%d", p.skipped),
+		fmt.Sprintf("failed=%d", p.failed),
+		fmt.Sprintf("workers=%d", p.workers),
+	}
+	if p.current != "" && status == "" {
+		parts = append(parts, "current="+p.current)
+	}
+	parts = append(parts, "elapsed="+formatPreRenderProgressDuration(now.Sub(p.started)))
+	if status == "" {
+		parts = append(parts, "eta="+p.eta(now))
+	}
+
+	fmt.Fprint(p.writer, strings.Join(parts, " "))
+}
+
+func (p *preRenderProgressReporter) eta(now time.Time) string {
+	if p == nil || p.total <= 0 {
+		return "0s"
+	}
+	if p.completed <= 0 {
+		return "unknown"
+	}
+	if p.completed >= p.total {
+		return "0s"
+	}
+
+	elapsed := now.Sub(p.started)
+	remaining := p.total - p.completed
+	eta := time.Duration(int64(elapsed) / int64(p.completed) * int64(remaining))
+	return formatPreRenderProgressDuration(eta)
+}
+
+func preRenderProgressBar(completed int, total int) string {
+	if total <= 0 {
+		return strings.Repeat("#", preRenderProgressBarWidth)
+	}
+	if completed < 0 {
+		completed = 0
+	}
+	if completed > total {
+		completed = total
+	}
+
+	filled := int(float64(completed) / float64(total) * preRenderProgressBarWidth)
+	if completed == total {
+		filled = preRenderProgressBarWidth
+	}
+	return strings.Repeat("#", filled) + strings.Repeat("-", preRenderProgressBarWidth-filled)
+}
+
+func formatPreRenderProgressDuration(duration time.Duration) string {
+	if duration <= 0 {
+		return "0s"
+	}
+	return duration.Round(time.Second).String()
 }
 
 func (r *Renderer) renderOptions() *mbr.BlockRenderOptions {
@@ -415,7 +609,7 @@ func (r *Renderer) cachedRenderedItemWithSkip(
 	if shouldSkip != nil {
 		if skip, reason := shouldSkip(resourceID); skip {
 			if strings.TrimSpace(reason) != "" {
-				fmt.Println(reason)
+				global.Warningln(reason)
 			}
 			return nil, true, nil
 		}

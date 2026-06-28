@@ -60,7 +60,7 @@ func (m *MinecraftAssetLoader) LoadModelDefinitions(assetsRoot string, overlayRo
 		// fmt.Printf("Processing namespace root: %s (namespace: %s, source: %s)\n", namespaceRoot.Path, namespaceRoot.Namespace, namespaceRoot.SourceId)
 		provider := *namespaceRoot.Provider
 		if provider == nil {
-			fmt.Printf("Warning: No resource provider found for namespace root at path '%s'. Skipping.\n", namespaceRoot.Path)
+			global.Warningf("Warning: No resource provider found for namespace root at path '%s'. Skipping.\n", namespaceRoot.Path)
 			continue
 		}
 
@@ -316,7 +316,7 @@ func MinecraftAssetLoaderLoadBlockInfos(assetsRoot string, modelDefinitions map[
 	for _, root := range namespaceRoots {
 		provider := root.Provider
 		if provider == nil {
-			fmt.Printf("Warning: No resource provider found for namespace root at path '%s'. Skipping.\n", root.Path)
+			global.Warningf("Warning: No resource provider found for namespace root at path '%s'. Skipping.\n", root.Path)
 			continue
 		}
 

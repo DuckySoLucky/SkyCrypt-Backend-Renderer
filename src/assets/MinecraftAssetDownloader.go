@@ -47,7 +47,7 @@ func (downloader *MinecraftAssetDownloader) DownloadAndExtractAssets(
 	}
 	defer func() {
 		if closeErr := response.Body.Close(); closeErr != nil {
-			fmt.Printf("warning: failed to close output file %s: %v\n", outputPath, closeErr)
+			global.Warningf("warning: failed to close output file %s: %v\n", outputPath, closeErr)
 		}
 	}()
 
@@ -80,7 +80,7 @@ func (downloader *MinecraftAssetDownloader) DownloadAndExtractAssets(
 	}
 	defer func() {
 		if closeErr := versionResponse.Body.Close(); closeErr != nil {
-			fmt.Printf("warning: failed to close output file %s: %v\n", outputPath, closeErr)
+			global.Warningf("warning: failed to close output file %s: %v\n", outputPath, closeErr)
 		}
 	}()
 
@@ -192,7 +192,7 @@ func downloadFile(url string, outputPath string, forceRedownload bool) error {
 	}
 	defer func() {
 		if closeErr := response.Body.Close(); closeErr != nil {
-			fmt.Printf("warning: failed to close output file %s: %v\n", outputPath, closeErr)
+			global.Warningf("warning: failed to close output file %s: %v\n", outputPath, closeErr)
 		}
 	}()
 
@@ -206,7 +206,7 @@ func downloadFile(url string, outputPath string, forceRedownload bool) error {
 	}
 	defer func() {
 		if closeErr := outFile.Close(); closeErr != nil {
-			fmt.Printf("warning: failed to close output file %s: %v\n", outputPath, closeErr)
+			global.Warningf("warning: failed to close output file %s: %v\n", outputPath, closeErr)
 		}
 	}()
 
@@ -268,7 +268,7 @@ func computeFileSHA1(filePath string) (string, error) {
 
 	defer func() {
 		if closeErr := file.Close(); closeErr != nil {
-			fmt.Printf("warning: failed to close file %s after hashing: %v\n", filePath, closeErr)
+			global.Warningf("warning: failed to close file %s after hashing: %v\n", filePath, closeErr)
 		}
 	}()
 
@@ -291,7 +291,7 @@ func extractAssets(jarPath string, outputDir string) error {
 	}
 	defer func() {
 		if closeErr := archive.Close(); closeErr != nil {
-			fmt.Printf("warning: failed to close zip archive %s: %v\n", jarPath, closeErr)
+			global.Warningf("warning: failed to close zip archive %s: %v\n", jarPath, closeErr)
 		}
 	}()
 
@@ -334,7 +334,7 @@ func extractAssets(jarPath string, outputDir string) error {
 		if err != nil {
 			defer func() {
 				if closeErr := inFile.Close(); closeErr != nil {
-					fmt.Printf("warning: failed to close zip entry %s after failed extraction: %v\n", entry.Name, closeErr)
+					global.Warningf("warning: failed to close zip entry %s after failed extraction: %v\n", entry.Name, closeErr)
 				}
 			}()
 

@@ -874,7 +874,7 @@ func TryBuildTextureAnimation(spriteSheet image.RGBA, openMcmeta *func() (io.Rea
 	}
 	defer func() {
 		if closeErr := stream.Close(); closeErr != nil {
-			fmt.Printf("warning: failed to close stream for animation metadata: %v\n", closeErr)
+			global.Warningf("warning: failed to close stream for animation metadata: %v\n", closeErr)
 		}
 	}()
 

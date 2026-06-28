@@ -5,6 +5,7 @@ import (
 	nbt "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/NBT"
 	texturepacks "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/TexturePacks"
 	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/global"
 	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/imagecache"
 	"image"
 	"image/color"
@@ -348,7 +349,7 @@ func (renderer *MinecraftBlockRenderer) SetCacheDirectory(cacheDir string) {
 	}
 
 	if err := imagecache.EnsureCacheVersion(cacheDir, imagecache.CacheFormatVersion, "rendered", "player_skins", "derived"); err != nil {
-		fmt.Printf("warning: failed to prepare renderer cache directory %s: %v\n", cacheDir, err)
+		global.Warningf("warning: failed to prepare renderer cache directory %s: %v\n", cacheDir, err)
 	}
 
 	renderer._playerSkinCacheDirectory = filepath.Join(cacheDir, "player_skins")

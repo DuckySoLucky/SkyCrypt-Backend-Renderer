@@ -1,11 +1,13 @@
 package renderer
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"image"
 	"image/color"
 	"image/png"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +18,7 @@ import (
 	mbr "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/MinecraftBlockRenderer"
 	nbt "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/NBT"
 	texturepacks "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/TexturePacks"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/global"
 	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/imagecache"
 )
 
@@ -601,6 +604,132 @@ func TestPreRenderSkyBlockItemIDsSkipsMissingCustomTexture(t *testing.T) {
 	}
 }
 
+func TestPreRenderWarningsQuietByDefault(t *testing.T) {
+	renderer := newBrokenTextureRenderer(t, false)
+
+	var result *PreRenderResult
+	var err error
+	output := captureStdout(t, func() {
+		result, err = renderer.PreRenderSkyBlockItemIDs(context.Background(), []string{"BROKEN_TEXTURE"}, PreRenderOptions{
+			Workers: 1,
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Skipped != 1 {
+		t.Fatalf("expected skipped item, got %#v", result)
+	}
+	if strings.Contains(output, "warning:") {
+		t.Fatalf("expected warning output to be suppressed, got %q", output)
+	}
+}
+
+func TestPreRenderWarningsPrintWhenVerboseLoggingEnabled(t *testing.T) {
+	renderer := newBrokenTextureRenderer(t, true)
+
+	var result *PreRenderResult
+	var err error
+	output := captureStdout(t, func() {
+		result, err = renderer.PreRenderSkyBlockItemIDs(context.Background(), []string{"BROKEN_TEXTURE"}, PreRenderOptions{
+			Workers: 1,
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Skipped != 1 {
+		t.Fatalf("expected skipped item, got %#v", result)
+	}
+	if !strings.Contains(output, `warning: skyblock item "BROKEN_TEXTURE" was skipped`) {
+		t.Fatalf("expected warning output, got %q", output)
+	}
+}
+
+func TestPreRenderProgressQuietByDefault(t *testing.T) {
+	renderer := newTestRenderer(t)
+	var progress bytes.Buffer
+
+	if _, err := renderer.PreRenderSkyBlockItemIDs(context.Background(), []string{"TEST_ITEM"}, PreRenderOptions{
+		Workers:        1,
+		ProgressWriter: &progress,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if progress.Len() != 0 {
+		t.Fatalf("expected no progress output by default, got %q", progress.String())
+	}
+}
+
+func TestPreRenderProgressWritesToConfiguredWriter(t *testing.T) {
+	renderer := newTestRenderer(t)
+	var progress bytes.Buffer
+
+	result, err := renderer.PreRenderSkyBlockItemIDs(context.Background(), []string{"TEST_ITEM"}, PreRenderOptions{
+		Workers:        1,
+		ShowProgress:   true,
+		ProgressWriter: &progress,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Succeeded != 1 {
+		t.Fatalf("expected successful item, got %#v", result)
+	}
+
+	output := progress.String()
+	for _, expected := range []string{"pre-render", "[", "]", "done", "100.0%", "eta="} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("expected progress output to contain %q, got %q", expected, output)
+		}
+	}
+}
+
+func TestPreRenderProgressCountsDuplicateInputs(t *testing.T) {
+	renderer := newTestRenderer(t)
+	var progress bytes.Buffer
+
+	result, err := renderer.PreRenderSkyBlockItemIDs(context.Background(), []string{"TEST_ITEM", "TEST_ITEM"}, PreRenderOptions{
+		Workers:        1,
+		ShowProgress:   true,
+		ProgressWriter: &progress,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Succeeded != 2 {
+		t.Fatalf("expected duplicate inputs to both succeed, got %#v", result)
+	}
+	if !strings.Contains(progress.String(), "2/2") {
+		t.Fatalf("expected duplicate inputs to advance progress to 2/2, got %q", progress.String())
+	}
+}
+
+func TestPreRenderProgressReportsCanceledContext(t *testing.T) {
+	renderer := newTestRenderer(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var progress bytes.Buffer
+
+	result, err := renderer.PreRenderSkyBlockItemIDs(ctx, []string{"TEST_ITEM"}, PreRenderOptions{
+		Workers:        1,
+		ShowProgress:   true,
+		ProgressWriter: &progress,
+	})
+	if err == nil {
+		t.Fatal("expected cancellation error")
+	}
+	if result == nil || result.Failed != 1 {
+		t.Fatalf("expected canceled pre-render to fail one entry, got %#v", result)
+	}
+	output := progress.String()
+	for _, expected := range []string{"pre-render canceled", "1/1", "failed=1"} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("expected canceled progress output to contain %q, got %q", expected, output)
+		}
+	}
+}
+
 func TestPreRenderSkyBlockItemIDsSkipsExistingUnlessOverwrite(t *testing.T) {
 	renderer := newTestRenderer(t)
 
@@ -706,6 +835,56 @@ func newTestRenderer(t testing.TB) *Renderer {
 		renderCache: make(map[string]RenderedItem),
 		inflight:    make(map[string]*renderInflight),
 	}
+}
+
+func newBrokenTextureRenderer(t testing.TB, verboseLogging bool) *Renderer {
+	t.Helper()
+	t.Cleanup(func() {
+		global.SetVerboseLogging(false)
+	})
+
+	assetsRoot := createRootMinimalAssets(t)
+	packRoot := createRootSkyblockPack(t, "testpack")
+	writeRootJSON(t, packRoot, "assets/skyblock/items/broken_texture.json", `{"model":{"type":"model","model":"firmskyblock:item/broken_texture"}}`)
+	writeRootJSON(t, packRoot, "assets/firmskyblock/models/item/broken_texture.json", `{"parent":"builtin/generated","textures":{"layer0":"firmskyblock:item/does_not_exist"}}`)
+
+	renderer, err := NewRenderer(Options{
+		AssetsRoot:        assetsRoot,
+		ResourcePacksRoot: filepath.Dir(packRoot),
+		PackIDs:           []string{"testpack"},
+		Size:              32,
+		CacheDir:          filepath.Join(t.TempDir(), "cache"),
+		VerboseLogging:    verboseLogging,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return renderer
+}
+
+func captureStdout(t testing.TB, fn func()) string {
+	t.Helper()
+
+	original := os.Stdout
+	read, write, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan string, 1)
+	go func() {
+		var buffer bytes.Buffer
+		_, _ = io.Copy(&buffer, read)
+		_ = read.Close()
+		done <- buffer.String()
+	}()
+
+	os.Stdout = write
+	fn()
+	_ = write.Close()
+	os.Stdout = original
+
+	return <-done
 }
 
 func createRootMinimalAssets(t testing.TB) string {

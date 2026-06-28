@@ -5,6 +5,7 @@ import (
 	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src"
 	geometry "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/Geometry"
 	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
+	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/global"
 	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/model"
 	"image"
 )
@@ -64,7 +65,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) BuildTrianglesForElement(
 			texture = _minecraftBlockRenderer._textureRepository.GetTexture(textureId)
 		}
 		if _minecraftBlockRenderer._textureRepository.IsMissingTexture(texture) {
-			fmt.Printf("warning: model %q face %q could not resolve texture %q; using missing texture placeholder\n", blockName, data.BlockFaceDirectionToString(direction), textureId)
+			global.Warningf("warning: model %q face %q could not resolve texture %q; using missing texture placeholder\n", blockName, data.BlockFaceDirectionToString(direction), textureId)
 		}
 
 		faceUv := _minecraftBlockRenderer.GetFaceUv(face, direction, element)

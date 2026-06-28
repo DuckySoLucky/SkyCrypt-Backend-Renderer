@@ -2942,7 +2942,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryRenderCustomTextureFal
 		fallbackRenderer = _minecraftBlockRenderer.GetRendererForPackStack([]string{})
 	}
 
-	fmt.Printf("warning: item %q custom texture was not found; falling back to vanilla item %q\n", itemName, fallbackItem)
+	global.Warningf("warning: item %q custom texture was not found; falling back to vanilla item %q\n", itemName, fallbackItem)
 	return fallbackRenderer.RenderGuiItemInternal(fallbackItem, &fallbackOptions, capture)
 }
 
