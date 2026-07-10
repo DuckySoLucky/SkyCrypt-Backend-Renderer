@@ -271,6 +271,11 @@ func (texturePackRegistry *TexturePackRegistry) RegisterPackCore(directory strin
 		}
 	} else {
 		// Traditional directory-based pack
+		var err error
+		provider, err = assets.NewDirectoryResourceProvider(directory)
+		if err != nil {
+			panic("Failed to create directory resource provider for texture pack at '" + directory + "': " + err.Error())
+		}
 		namespaceRoots = ResolveNamespaceRoots(directory)
 		assetsPath = namespaceRoots["minecraft"]
 		if assetsPath == "" {

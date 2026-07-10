@@ -787,9 +787,11 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) getSkyblockItemDefinition
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) loadSkyblockItemDefinition(encodedId string) skyblockItemDefinitionCacheEntry {
 	direct := "assets/skyblock/items/" + strings.ToLower(encodedId) + ".json"
 	firmamentDirect := "assets/firmskyblock/items/" + strings.ToLower(encodedId) + ".json"
+	hypixelItemsRoot := "assets/hypixel_skyblock/items"
 	fileName := strings.ToLower(encodedId) + ".json"
 	suffix := "/" + direct
 	firmamentSuffix := "/" + firmamentDirect
+	hypixelSuffix := "/" + hypixelItemsRoot + "/"
 
 	for packIndex := len(_minecraftBlockRenderer._packContext.Packs) - 1; packIndex >= 0; packIndex-- {
 		pack := _minecraftBlockRenderer._packContext.Packs[packIndex]
@@ -811,6 +813,9 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) loadSkyblockItemDefinitio
 			if files, err := pack.Provider.EnumerateFiles("assets/firmskyblock/items", fileName, true); err == nil {
 				candidates = append(candidates, files...)
 			}
+			if files, err := pack.Provider.EnumerateFiles(hypixelItemsRoot, fileName, true); err == nil {
+				candidates = append(candidates, files...)
+			}
 		}
 		if len(candidates) == 0 {
 			files, err := pack.Provider.EnumerateFiles("", fileName, true)
@@ -819,7 +824,8 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) loadSkyblockItemDefinitio
 			}
 			for _, file := range files {
 				lower := strings.ToLower(strings.ReplaceAll(file, "\\", "/"))
-				if lower == direct || lower == firmamentDirect || strings.HasSuffix(lower, suffix) || strings.HasSuffix(lower, firmamentSuffix) {
+				if lower == direct || lower == firmamentDirect || strings.HasSuffix(lower, suffix) || strings.HasSuffix(lower, firmamentSuffix) ||
+					(strings.Contains(lower, hypixelSuffix) && strings.HasSuffix(lower, "/"+fileName)) {
 					candidates = append(candidates, file)
 				}
 			}
@@ -831,8 +837,8 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) loadSkyblockItemDefinitio
 				continue
 			}
 
-			var itemDefinition map[string]interface{}
-			if err := global.JSON.Unmarshal([]byte(jsonContent), &itemDefinition); err != nil {
+			itemDefinition, err := data.ParseItemDefinitionJSON([]byte(jsonContent))
+			if err != nil {
 				continue
 			}
 

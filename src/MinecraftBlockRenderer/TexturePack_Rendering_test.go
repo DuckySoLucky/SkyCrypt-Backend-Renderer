@@ -120,6 +120,43 @@ func TestVanillaSkyBlockItemIDWithoutPackOverrideRendersVanilla(t *testing.T) {
 	}
 }
 
+func TestHypixelSkyBlockNestedItemDefinitionRendersPackModel(t *testing.T) {
+	assetsRoot := createMinimalAssets(t)
+	packRoot := createEmptyPack(t, "HYPIXEL_PACK")
+	writeJSON(t, packRoot, "assets/hypixel_skyblock/items/item/uncategorized/aspect_of_the_end.json", `{"model":{"type":"minecraft:model","model":"hypixel_skyblock:item/uncategorized/aspect_of_the_end"}}`)
+	writeJSON(t, packRoot, "assets/hypixel_skyblock/models/item/uncategorized/aspect_of_the_end.json", `{"parent":"builtin/generated","textures":{"layer0":"hypixel_skyblock:item/uncategorized/aspect_of_the_end"}}`)
+	writePNG(t, filepath.Join(packRoot, "assets", "hypixel_skyblock", "textures", "item", "uncategorized", "aspect_of_the_end.png"), 16, 16, color.RGBA{R: 120, G: 50, B: 220, A: 255})
+
+	registry := texturepacks.NewTexturePackRegistry()
+	if _, err := registry.RegisterPack(packRoot); err != nil {
+		t.Fatal(err)
+	}
+	renderer := CreateFromMinecraftAssets(assetsRoot, registry, nil)
+	packRenderer, _ := renderer.ResolveRendererForOptions(BlockRenderOptions{PackIds: []string{"HYPIXEL_PACK"}})
+	if entry := packRenderer.getSkyblockItemDefinition("aspect_of_the_end"); !entry.Loaded {
+		t.Fatal("nested Hypixel SkyBlock item definition was not loaded")
+	}
+	if model := packRenderer.ResolveSkyblockItemModelFromPackProviders("aspect_of_the_end", "firmskyblock:item/aspect_of_the_end", &data.ItemRenderData{CustomData: nbt.NewNbtCompound(map[string]nbt.NbtTag{
+		"id": nbt.NewNbtString("ASPECT_OF_THE_END"),
+	})}, "gui"); model == nil {
+		t.Fatal("nested Hypixel SkyBlock item model was not resolved")
+	}
+
+	rendered, err := renderer.RenderSkyBlockItemID("ASPECT_OF_THE_END", &BlockRenderOptions{
+		Size:    32,
+		PackIds: []string{"HYPIXEL_PACK"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rendered == nil || !hasOpaquePixels(rendered.Image) {
+		t.Fatal("Hypixel SkyBlock item render did not produce visible pixels")
+	}
+	if rendered.ResourceId.SourcePackId != "HYPIXEL_PACK" {
+		t.Fatalf("source pack = %q, want HYPIXEL_PACK; model=%v textures=%v", rendered.ResourceId.SourcePackId, rendered.ResourceId.Model, rendered.ResourceId.Textures)
+	}
+}
+
 func TestNBTItemModelSelectorTakesPriorityOverFirmamentFallback(t *testing.T) {
 	assetsRoot := createMinimalAssets(t)
 	packRoot := createEmptyPack(t, "testpack")

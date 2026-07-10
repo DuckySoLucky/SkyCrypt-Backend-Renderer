@@ -736,18 +736,15 @@ func EnumerateItemDefinitions(assetsRoot string, overlayRoots []string, assetNam
 				continue
 			}
 
-			var itemData map[string]interface{}
-			if err := global.JSON.Unmarshal([]byte(jsonContent), &itemData); err != nil {
+			itemData, err := ParseItemDefinitionJSON([]byte(jsonContent))
+			if err != nil {
 				fmt.Printf("Error deserializing JSON from file %s: %v\n", file, err)
 				continue
 			}
 
 			tintMap := make(map[int]ItemTintInfo)
 			ExtractTintInfoFromDefinition(itemData, tintMap)
-			selector, err := ParseItemModelSelectorFromJSON([]byte(jsonContent))
-			if err != nil {
-				selector = nil
-			}
+			selector := ParseItemModelSelectorFromRoot(itemData)
 			modelReference := ResolveModelReferenceFromItemDefinition(itemData)
 
 			entry := ItemDefinitionEntry{

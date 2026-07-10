@@ -71,7 +71,7 @@ func TestNewRendererPurgesOldCacheVersion(t *testing.T) {
 }
 
 func TestRendererPackIDsReturnsCopy(t *testing.T) {
-	source := []string{"fsr", "hplus"}
+	source := []string{"fsr", "hplus", "HYPIXEL_PACK"}
 	renderer := &Renderer{packIDs: append([]string(nil), source...)}
 
 	packIDs := renderer.PackIDs()
