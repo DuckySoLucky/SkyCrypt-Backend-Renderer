@@ -82,6 +82,20 @@ func TestRendererPackIDsReturnsCopy(t *testing.T) {
 	}
 }
 
+func TestRenderOptionsPreserveNilAndExplicitEmptyPackIDs(t *testing.T) {
+	renderer := &Renderer{size: 32}
+
+	defaultOptions := renderer.renderOptionsWithPackIDs(nil)
+	if defaultOptions.PackIds != nil {
+		t.Fatalf("nil pack IDs became %#v", defaultOptions.PackIds)
+	}
+
+	vanillaOptions := renderer.renderOptionsWithPackIDs([]string{})
+	if vanillaOptions.PackIds == nil || len(vanillaOptions.PackIds) != 0 {
+		t.Fatalf("explicit empty pack IDs became %#v", vanillaOptions.PackIds)
+	}
+}
+
 func TestRenderSkyBlockItemIDWritesWebPCache(t *testing.T) {
 	renderer := newTestRenderer(t)
 

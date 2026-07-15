@@ -185,8 +185,9 @@ func MergeBlockRenderOptions(options *BlockRenderOptions) BlockRenderOptions {
 	if options.OverrideGuiTransform != nil {
 		effective.OverrideGuiTransform = options.OverrideGuiTransform
 	}
-	if len(options.PackIds) > 0 {
-		effective.PackIds = options.PackIds
+	if options.PackIds != nil {
+		effective.PackIds = make([]string, len(options.PackIds))
+		copy(effective.PackIds, options.PackIds)
 	}
 	if options.ItemData != nil {
 		effective.ItemData = options.ItemData

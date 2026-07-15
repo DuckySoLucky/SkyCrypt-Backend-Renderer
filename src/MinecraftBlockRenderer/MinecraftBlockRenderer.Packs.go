@@ -291,7 +291,7 @@ func RenderPackContextCreate(assetsDirectory *string, baseOverlayRoots []Overlay
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) ResolveRendererForOptions(options BlockRenderOptions) (*MinecraftBlockRenderer, BlockRenderOptions) {
 	var forwardedOptions BlockRenderOptions
-	if _minecraftBlockRenderer._packRegistry == nil || options.PackIds == nil || len(options.PackIds) == 0 {
+	if _minecraftBlockRenderer._packRegistry == nil || options.PackIds == nil {
 		forwardedOptions = options
 		return _minecraftBlockRenderer, forwardedOptions
 	}

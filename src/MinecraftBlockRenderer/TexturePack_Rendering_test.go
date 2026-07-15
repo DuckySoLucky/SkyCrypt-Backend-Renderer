@@ -4,6 +4,7 @@ import (
 	nbt "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/NBT"
 	texturepacks "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/TexturePacks"
 	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
+	"image"
 	"image/color"
 	"os"
 	"path/filepath"
@@ -34,6 +35,83 @@ func TestComputeResourceIdIncludesPackOverrides(t *testing.T) {
 	recomputed := resolvedRenderer.ComputeResourceIdInternal("diamond_sword", forwarded, nil)
 	if recomputed.ResourceId != rendered.ResourceId.ResourceId {
 		t.Fatalf("recomputed resource id = %q, want %q", recomputed.ResourceId, rendered.ResourceId.ResourceId)
+	}
+}
+
+func TestExplicitEmptyPackStackRendersVanillaBlockModel(t *testing.T) {
+	assetsRoot := createMinimalAssets(t)
+	writeJSON(t, assetsRoot, "items/stone.json", `{"model":{"model":"minecraft:block/stone"}}`)
+
+	packRoot := createEmptyPack(t, "overridepack")
+	writeJSON(t, packRoot, "assets/minecraft/items/stone.json", `{"model":{"type":"model","model":"minecraft:block/stone"}}`)
+	writeJSON(t, packRoot, "assets/minecraft/models/block/stone.json", `{
+		"textures":{"all":"minecraft:block/stone"},
+		"elements":[{"from":[0,0,0],"to":[16,16,16],"faces":{
+			"north":{"texture":"#all"},"south":{"texture":"#all"},"east":{"texture":"#all"},
+			"west":{"texture":"#all"},"up":{"texture":"#all"},"down":{"texture":"#all"}
+		}}]
+	}`)
+	writePNG(t, filepath.Join(packRoot, "assets", "minecraft", "textures", "block", "stone.png"), 16, 16, color.RGBA{R: 20, G: 220, B: 80, A: 255})
+
+	registry := texturepacks.NewTexturePackRegistry()
+	if _, err := registry.RegisterPack(packRoot); err != nil {
+		t.Fatal(err)
+	}
+	renderer := CreateFromMinecraftAssets(assetsRoot, registry, []string{"overridepack"})
+
+	defaultRenderer, defaultOptions := renderer.ResolveRendererForOptions(BlockRenderOptions{Size: 64})
+	if defaultRenderer != renderer || defaultOptions.PackIds != nil {
+		t.Fatal("nil pack IDs did not preserve the configured renderer")
+	}
+
+	vanillaRenderer, vanillaOptions := renderer.ResolveRendererForOptions(BlockRenderOptions{Size: 64, PackIds: []string{}})
+	if vanillaRenderer == renderer {
+		t.Fatal("explicit empty pack IDs reused the configured renderer")
+	}
+	if vanillaOptions.PackIds != nil {
+		t.Fatalf("forwarded vanilla pack IDs = %#v, want nil", vanillaOptions.PackIds)
+	}
+	if len(vanillaRenderer._packContext.Packs) != 0 || len(vanillaRenderer._packContext.OverlayRoots) != 0 {
+		t.Fatalf("vanilla context contains packs=%d overlays=%d", len(vanillaRenderer._packContext.Packs), len(vanillaRenderer._packContext.OverlayRoots))
+	}
+	if vanillaRenderer._packContext.PackStackHash != "vanilla" {
+		t.Fatalf("vanilla pack fingerprint = %q", vanillaRenderer._packContext.PackStackHash)
+	}
+
+	custom := renderer.RenderGuiItemWithResourceId("stone", &BlockRenderOptions{Size: 64})
+	vanilla := renderer.RenderGuiItemWithResourceId("stone", &BlockRenderOptions{Size: 64, PackIds: []string{}})
+	if custom == nil || vanilla == nil {
+		t.Fatalf("block renders custom=%v vanilla=%v", custom != nil, vanilla != nil)
+	}
+	if custom.ResourceId.SourcePackId != "overridepack" {
+		t.Fatalf("custom source pack = %q", custom.ResourceId.SourcePackId)
+	}
+	if vanilla.ResourceId.SourcePackId != "vanilla" {
+		t.Fatalf("vanilla source pack = %q", vanilla.ResourceId.SourcePackId)
+	}
+	if custom.ResourceId.ResourceId == vanilla.ResourceId.ResourceId {
+		t.Fatal("custom and vanilla renders reused the same resource ID")
+	}
+	vanillaBySkyBlockID, err := renderer.RenderSkyBlockItemID("STONE", &BlockRenderOptions{Size: 64, PackIds: []string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vanillaBySkyBlockID == nil || vanillaBySkyBlockID.ResourceId.SourcePackId != "vanilla" {
+		t.Fatalf("explicit vanilla SkyBlock ID render = %#v", vanillaBySkyBlockID)
+	}
+	if !hasOpaquePixels(vanilla.Image) {
+		t.Fatal("vanilla block model render has no visible pixels")
+	}
+	bounds := vanilla.Image.Bounds()
+	for _, point := range []image.Point{
+		{X: bounds.Min.X, Y: bounds.Min.Y},
+		{X: bounds.Max.X - 1, Y: bounds.Min.Y},
+		{X: bounds.Min.X, Y: bounds.Max.Y - 1},
+		{X: bounds.Max.X - 1, Y: bounds.Max.Y - 1},
+	} {
+		if vanilla.Image.RGBAAt(point.X, point.Y).A != 0 {
+			t.Fatalf("vanilla block render corner %v is opaque; render appears flat", point)
+		}
 	}
 }
 

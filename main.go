@@ -165,7 +165,7 @@ func (r *Renderer) RenderSkyBlockItemID(id string) (*RenderedItem, error) {
 }
 
 func (r *Renderer) RenderSkyBlockItemIDWithPackIDs(id string, packIDs []string) (*RenderedItem, error) {
-	if len(packIDs) == 0 {
+	if packIDs == nil {
 		return r.RenderSkyBlockItemID(id)
 	}
 	return r.cachedSkyBlockItemIDWithPackIDs(id, packIDs, false)
@@ -525,7 +525,10 @@ func (r *Renderer) renderOptions() *mbr.BlockRenderOptions {
 func (r *Renderer) renderOptionsWithPackIDs(packIDs []string) *mbr.BlockRenderOptions {
 	options := mbr.DefaultBlockRenderOptions()
 	options.Size = r.Size()
-	options.PackIds = append([]string(nil), packIDs...)
+	if packIDs != nil {
+		options.PackIds = make([]string, len(packIDs))
+		copy(options.PackIds, packIDs)
+	}
 	return &options
 }
 

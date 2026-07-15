@@ -142,7 +142,7 @@ func (renderer *MinecraftBlockRenderer) prepareSkyBlockItemIDRender(skyBlockItem
 		effectiveOptions.CustomTextureFallbackItem = "minecraft:player_head"
 	}
 	target := "minecraft:player_head"
-	if len(effectiveOptions.PackIds) > 0 {
+	if effectiveOptions.PackIds != nil {
 		encodedID := renderer.EncodeFirmamentId(skyBlockItemID)
 		if renderer.shouldRenderSkyBlockIDAsVanilla(encodedID, effectiveOptions) {
 			target = "minecraft:" + encodedID
@@ -165,7 +165,7 @@ func (renderer *MinecraftBlockRenderer) prepareItemObjectRender(normalized *data
 }
 
 func (renderer *MinecraftBlockRenderer) resolvePackedSkyblockItemObjectName(normalized *data.NormalizedItemInput, itemName string, options *BlockRenderOptions) string {
-	if normalized == nil || options == nil || len(options.PackIds) == 0 {
+	if normalized == nil || options == nil || options.PackIds == nil {
 		return itemName
 	}
 	if strings.TrimSpace(normalized.SkyblockID) == "" {
@@ -221,7 +221,7 @@ func (renderer *MinecraftBlockRenderer) resolvePackedSkyblockFallbackItem(normal
 }
 
 func (renderer *MinecraftBlockRenderer) normalizePackedSkyblockItemObjectOptions(normalized *data.NormalizedItemInput, options *BlockRenderOptions) *BlockRenderOptions {
-	if normalized == nil || options == nil || len(options.PackIds) == 0 {
+	if normalized == nil || options == nil || options.PackIds == nil {
 		return options
 	}
 	if strings.TrimSpace(normalized.SkyblockID) == "" || options.ItemData == nil {
@@ -246,7 +246,7 @@ func (renderer *MinecraftBlockRenderer) normalizePackedSkyblockItemObjectOptions
 }
 
 func (renderer *MinecraftBlockRenderer) shouldRenderSkyBlockIDAsVanilla(encodedID string, options *BlockRenderOptions) bool {
-	if renderer == nil || strings.TrimSpace(encodedID) == "" || options == nil || len(options.PackIds) == 0 {
+	if renderer == nil || strings.TrimSpace(encodedID) == "" || options == nil || options.PackIds == nil {
 		return false
 	}
 	if renderer.hasPackedSkyBlockResource(encodedID, options) {
