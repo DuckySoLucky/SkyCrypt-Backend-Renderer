@@ -96,6 +96,112 @@ func TestRenderOptionsPreserveNilAndExplicitEmptyPackIDs(t *testing.T) {
 	}
 }
 
+func TestRenderedDebugWebPPathRetainsCompleteResourceID(t *testing.T) {
+	debugInfo := &renderDebugInfo{
+		SkyBlockID:  "OVERCLOCKER_3000_" + strings.Repeat("LONG_SKYBLOCK_ID_", 20),
+		MinecraftID: "minecraft:paper",
+		ItemModel:   "hypixel_skyblock:item/island_relevant/garden/greenhouse/overclocker_3000",
+		DisplayName: strings.Repeat("Overclocker 3000 ", 20),
+	}
+	plusResourceID := strings.Repeat("a", 64)
+	packResourceID := strings.Repeat("b", 64)
+	model := "hypixel_skyblock:item/island_relevant/garden/greenhouse/overclocker_3000"
+	cacheDir := t.TempDir()
+
+	plusPath := renderedDebugWebPPath(cacheDir, &mbr.ResourceIdResult{
+		ResourceId:   plusResourceID,
+		SourcePackId: "HYPIXEL_PLUS",
+		Model:        &model,
+		Textures:     []string{"hypixel_skyblock:item/overclocker_3000"},
+	}, debugInfo)
+	packPath := renderedDebugWebPPath(cacheDir, &mbr.ResourceIdResult{
+		ResourceId:   packResourceID,
+		SourcePackId: "HYPIXEL_PACK",
+		Model:        &model,
+		Textures:     []string{"hypixel_skyblock:item/overclocker_3000"},
+	}, debugInfo)
+
+	if plusPath == packPath {
+		t.Fatalf("resource paths collided: %q", plusPath)
+	}
+	for _, test := range []struct {
+		path       string
+		resourceID string
+	}{
+		{path: plusPath, resourceID: plusResourceID},
+		{path: packPath, resourceID: packResourceID},
+	} {
+		filename := filepath.Base(test.path)
+		wantSuffix := "__hash=" + test.resourceID + ".webp"
+		if !strings.HasSuffix(filename, wantSuffix) {
+			t.Fatalf("filename %q does not retain suffix %q", filename, wantSuffix)
+		}
+		if len(filename) > maxRenderedDebugFilenameLength {
+			t.Fatalf("filename length = %d, want <= %d: %q", len(filename), maxRenderedDebugFilenameLength, filename)
+		}
+	}
+}
+
+func TestRenderItemNBTWithPackIDsDoesNotReuseOtherPackCache(t *testing.T) {
+	assetsRoot := createRootMinimalAssets(t)
+	resourcePacksRoot := t.TempDir()
+	createSolidSkyblockPack(t, resourcePacksRoot, "HYPIXEL_PLUS", color.RGBA{R: 220, G: 40, B: 40, A: 255})
+	createSolidSkyblockPack(t, resourcePacksRoot, "HYPIXEL_PACK", color.RGBA{R: 40, G: 80, B: 220, A: 255})
+	renderer, err := NewRenderer(Options{
+		AssetsRoot:        assetsRoot,
+		ResourcePacksRoot: resourcePacksRoot,
+		PackIDs:           []string{"HYPIXEL_PLUS", "HYPIXEL_PACK"},
+		CacheDir:          filepath.Join(t.TempDir(), "cache"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	input := map[string]any{
+		"id": "minecraft:paper",
+		"tag": map[string]any{
+			"ExtraAttributes": map[string]any{"id": "OVERCLOCKER_3000"},
+			"ItemModel":       "hypixel_skyblock:item/island_relevant/garden/greenhouse/overclocker_3000",
+			"display": map[string]any{
+				"Name": strings.Repeat("§6Overclocker 3000 ", 20),
+				"Lore": []any{strings.Repeat("§7Permanently increases the maximum level of a Farming Tool. ", 20)},
+			},
+		},
+	}
+
+	plusItem, err := renderer.RenderItemNBTWithPackIDs(input, []string{"HYPIXEL_PLUS"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	packItem, err := renderer.RenderItemNBTWithPackIDs(input, []string{"HYPIXEL_PACK"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if plusItem.TexturePackID != "HYPIXEL_PLUS" {
+		t.Fatalf("first texture pack = %q, want HYPIXEL_PLUS", plusItem.TexturePackID)
+	}
+	if packItem.TexturePackID != "HYPIXEL_PACK" {
+		t.Fatalf("second texture pack = %q, want HYPIXEL_PACK", packItem.TexturePackID)
+	}
+	if plusItem.Path == packItem.Path {
+		t.Fatalf("pack renders reused path %q", plusItem.Path)
+	}
+	plusBytes, err := os.ReadFile(plusItem.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	packBytes, err := os.ReadFile(packItem.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(plusBytes, packBytes) {
+		t.Fatal("pack renders returned identical WebP bytes")
+	}
+	assertCachedWebPHasColor(t, plusItem.Path, color.NRGBA{R: 220, G: 40, B: 40, A: 255})
+	assertCachedWebPHasColor(t, packItem.Path, color.NRGBA{R: 40, G: 80, B: 220, A: 255})
+}
+
 func TestRenderSkyBlockItemIDWritesWebPCache(t *testing.T) {
 	renderer := newTestRenderer(t)
 
@@ -945,6 +1051,18 @@ func createRootSkyblockPack(t testing.TB, id string) string {
 	if err := os.WriteFile(filepath.Join(root, "pack.png"), []byte{}, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	return root
+}
+
+func createSolidSkyblockPack(t testing.TB, resourcePacksRoot string, id string, textureColor color.RGBA) string {
+	t.Helper()
+	root := filepath.Join(resourcePacksRoot, id)
+	writeRootJSON(t, root, "meta.json", `{"id":"`+id+`","name":"`+id+`","version":"test"}`)
+	writeRootJSON(t, root, "pack.mcmeta", `{"pack":{"pack_format":99,"description":"test"}}`)
+	writeRootJSON(t, root, "assets/minecraft/items/paper.json", `{"model":{"model":"minecraft:item/paper"}}`)
+	writeRootJSON(t, root, "assets/skyblock/items/overclocker_3000.json", `{"model":{"type":"model","model":"testpack:item/overclocker_3000"}}`)
+	writeRootJSON(t, root, "assets/testpack/models/item/overclocker_3000.json", `{"parent":"builtin/generated","textures":{"layer0":"testpack:item/overclocker_3000"}}`)
+	writeRootPNG(t, filepath.Join(root, "assets", "testpack", "textures", "item", "overclocker_3000.png"), 16, 16, textureColor)
 	return root
 }
 

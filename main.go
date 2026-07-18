@@ -753,6 +753,8 @@ func renderedWebPPath(cacheDir string, resourceID string) string {
 	return filepath.Join(cacheDir, "rendered", resourceID+".webp")
 }
 
+const maxRenderedDebugFilenameLength = 240
+
 func renderedDebugWebPPath(cacheDir string, resourceID *mbr.ResourceIdResult, debugInfo *renderDebugInfo) string {
 	if resourceID == nil {
 		return renderedWebPPath(cacheDir, "unknown")
@@ -788,17 +790,20 @@ func renderedDebugWebPPath(cacheDir string, resourceID *mbr.ResourceIdResult, de
 		}
 	}
 
-	hash := strings.TrimSpace(resourceID.ResourceId)
-	if len(hash) > 12 {
-		hash = hash[:12]
+	resourceSuffix := "__hash=" + strings.TrimSpace(resourceID.ResourceId) + ".webp"
+	debugPrefix := sanitizeDebugFilename(strings.Join(parts, "__"))
+	maxPrefixLength := maxRenderedDebugFilenameLength - len(resourceSuffix)
+	if maxPrefixLength < 0 {
+		maxPrefixLength = 0
 	}
-	parts = append(parts, "hash="+hash)
+	if len(debugPrefix) > maxPrefixLength {
+		debugPrefix = strings.Trim(debugPrefix[:maxPrefixLength], "._-")
+	}
+	if debugPrefix == "" {
+		resourceSuffix = strings.TrimPrefix(resourceSuffix, "__")
+	}
 
-	filename := sanitizeDebugFilename(strings.Join(parts, "__"))
-	if filename == "" {
-		filename = sanitizeDebugFilename(resourceID.ResourceId)
-	}
-	return filepath.Join(cacheDir, "rendered", filename+".webp")
+	return filepath.Join(cacheDir, "rendered", debugPrefix+resourceSuffix)
 }
 
 func debugInfoFromItemInput(item any) *renderDebugInfo {
@@ -934,13 +939,7 @@ func sanitizeDebugFilename(value string) string {
 		}
 	}
 
-	filename := strings.Trim(builder.String(), "._-")
-	const maxFilenameLength = 220
-	if len(filename) > maxFilenameLength {
-		filename = filename[:maxFilenameLength]
-		filename = strings.Trim(filename, "._-")
-	}
-	return filename
+	return strings.Trim(builder.String(), "._-")
 }
 
 func sourcePackID(resourceID *mbr.ResourceIdResult) string {
