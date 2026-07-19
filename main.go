@@ -760,50 +760,66 @@ func renderedDebugWebPPath(cacheDir string, resourceID *mbr.ResourceIdResult, de
 		return renderedWebPPath(cacheDir, "unknown")
 	}
 
-	var parts []string
+	var machineParts []string
+	var debugParts []string
 	if debugInfo != nil {
 		if strings.TrimSpace(debugInfo.SkyBlockID) != "" {
-			parts = append(parts, "skyblock="+debugInfo.SkyBlockID)
-		}
-		if strings.TrimSpace(debugInfo.MinecraftID) != "" {
-			parts = append(parts, "mc="+debugInfo.MinecraftID)
-		}
-		if strings.TrimSpace(debugInfo.ItemModel) != "" {
-			parts = append(parts, "itemmodel="+debugInfo.ItemModel)
+			machineParts = append(machineParts, "skyblock="+debugInfo.SkyBlockID)
+			if strings.TrimSpace(debugInfo.MinecraftID) != "" {
+				debugParts = append(debugParts, "mc="+debugInfo.MinecraftID)
+			}
+			if strings.TrimSpace(debugInfo.ItemModel) != "" {
+				debugParts = append(debugParts, "itemmodel="+debugInfo.ItemModel)
+			}
+		} else if strings.TrimSpace(debugInfo.ItemModel) != "" {
+			machineParts = append(machineParts, "itemmodel="+debugInfo.ItemModel)
+			if strings.TrimSpace(debugInfo.MinecraftID) != "" {
+				debugParts = append(debugParts, "mc="+debugInfo.MinecraftID)
+			}
+		} else if strings.TrimSpace(debugInfo.MinecraftID) != "" {
+			machineParts = append(machineParts, "mc="+debugInfo.MinecraftID)
 		}
 		if strings.TrimSpace(debugInfo.DisplayName) != "" {
-			parts = append(parts, "name="+debugInfo.DisplayName)
+			debugParts = append(debugParts, "name="+debugInfo.DisplayName)
 		}
 	}
 	if strings.TrimSpace(resourceID.SourcePackId) != "" {
-		parts = append(parts, "pack="+resourceID.SourcePackId)
+		machineParts = append(machineParts, "pack="+resourceID.SourcePackId)
 	}
 	if resourceID.Model != nil && strings.TrimSpace(*resourceID.Model) != "" {
-		parts = append(parts, "model="+*resourceID.Model)
+		debugParts = append(debugParts, "model="+*resourceID.Model)
 	}
 	for i, texture := range resourceID.Textures {
 		if i >= 2 {
 			break
 		}
 		if strings.TrimSpace(texture) != "" {
-			parts = append(parts, fmt.Sprintf("tex%d=%s", i+1, texture))
+			debugParts = append(debugParts, fmt.Sprintf("tex%d=%s", i+1, texture))
 		}
 	}
 
 	resourceSuffix := "__hash=" + strings.TrimSpace(resourceID.ResourceId) + ".webp"
-	debugPrefix := sanitizeDebugFilename(strings.Join(parts, "__"))
-	maxPrefixLength := maxRenderedDebugFilenameLength - len(resourceSuffix)
-	if maxPrefixLength < 0 {
-		maxPrefixLength = 0
+	machinePrefix := sanitizeDebugFilename(strings.Join(machineParts, "__"))
+	filename := machinePrefix
+	for _, debugPart := range debugParts {
+		debugPart = sanitizeDebugFilename(debugPart)
+		if debugPart == "" {
+			continue
+		}
+		candidate := debugPart
+		if filename != "" {
+			candidate = filename + "__" + debugPart
+		}
+		if len(candidate)+len(resourceSuffix) > maxRenderedDebugFilenameLength {
+			break
+		}
+		filename = candidate
 	}
-	if len(debugPrefix) > maxPrefixLength {
-		debugPrefix = strings.Trim(debugPrefix[:maxPrefixLength], "._-")
-	}
-	if debugPrefix == "" {
+	if filename == "" {
 		resourceSuffix = strings.TrimPrefix(resourceSuffix, "__")
 	}
 
-	return filepath.Join(cacheDir, "rendered", debugPrefix+resourceSuffix)
+	return filepath.Join(cacheDir, "rendered", filename+resourceSuffix)
 }
 
 func debugInfoFromItemInput(item any) *renderDebugInfo {

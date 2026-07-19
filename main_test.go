@@ -98,7 +98,7 @@ func TestRenderOptionsPreserveNilAndExplicitEmptyPackIDs(t *testing.T) {
 
 func TestRenderedDebugWebPPathRetainsCompleteResourceID(t *testing.T) {
 	debugInfo := &renderDebugInfo{
-		SkyBlockID:  "OVERCLOCKER_3000_" + strings.Repeat("LONG_SKYBLOCK_ID_", 20),
+		SkyBlockID:  "OVERCLOCKER_3000",
 		MinecraftID: "minecraft:paper",
 		ItemModel:   "hypixel_skyblock:item/island_relevant/garden/greenhouse/overclocker_3000",
 		DisplayName: strings.Repeat("Overclocker 3000 ", 20),
@@ -127,9 +127,10 @@ func TestRenderedDebugWebPPathRetainsCompleteResourceID(t *testing.T) {
 	for _, test := range []struct {
 		path       string
 		resourceID string
+		packID     string
 	}{
-		{path: plusPath, resourceID: plusResourceID},
-		{path: packPath, resourceID: packResourceID},
+		{path: plusPath, resourceID: plusResourceID, packID: "HYPIXEL_PLUS"},
+		{path: packPath, resourceID: packResourceID, packID: "HYPIXEL_PACK"},
 	} {
 		filename := filepath.Base(test.path)
 		wantSuffix := "__hash=" + test.resourceID + ".webp"
@@ -139,7 +140,94 @@ func TestRenderedDebugWebPPathRetainsCompleteResourceID(t *testing.T) {
 		if len(filename) > maxRenderedDebugFilenameLength {
 			t.Fatalf("filename length = %d, want <= %d: %q", len(filename), maxRenderedDebugFilenameLength, filename)
 		}
+		segments := strings.Split(strings.TrimSuffix(filename, ".webp"), "__")
+		if !containsString(segments, "skyblock=OVERCLOCKER_3000") {
+			t.Fatalf("filename %q does not retain complete SkyBlock ID segment", filename)
+		}
+		if !containsString(segments, "pack="+test.packID) {
+			t.Fatalf("filename %q does not retain complete pack segment %q", filename, test.packID)
+		}
 	}
+}
+
+func TestRenderedDebugWebPPathRetainsBestStableIdentifier(t *testing.T) {
+	resource := &mbr.ResourceIdResult{
+		ResourceId:   strings.Repeat("c", 64),
+		SourcePackId: "HYPIXEL_PACK",
+	}
+	tests := []struct {
+		name      string
+		debugInfo *renderDebugInfo
+		segment   string
+	}{
+		{
+			name: "item model",
+			debugInfo: &renderDebugInfo{
+				MinecraftID: "minecraft:paper",
+				ItemModel:   "hypixel_skyblock:item/island_relevant/garden/greenhouse/overclocker_3000",
+			},
+			segment: "itemmodel=hypixel_skyblock_item_island_relevant_garden_greenhouse_overclocker_3000",
+		},
+		{
+			name:      "minecraft id",
+			debugInfo: &renderDebugInfo{MinecraftID: "minecraft:paper"},
+			segment:   "mc=minecraft_paper",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			filename := filepath.Base(renderedDebugWebPPath(t.TempDir(), resource, test.debugInfo))
+			segments := strings.Split(strings.TrimSuffix(filename, ".webp"), "__")
+			if !containsString(segments, test.segment) {
+				t.Fatalf("filename %q does not retain stable segment %q", filename, test.segment)
+			}
+			if !containsString(segments, "pack=HYPIXEL_PACK") {
+				t.Fatalf("filename %q does not retain complete pack segment", filename)
+			}
+			if len(filename) > maxRenderedDebugFilenameLength {
+				t.Fatalf("filename length = %d, want <= %d", len(filename), maxRenderedDebugFilenameLength)
+			}
+		})
+	}
+}
+
+func TestRenderedDebugWebPPathDropsOptionalMetadataBeforeMachineSegments(t *testing.T) {
+	resourceID := strings.Repeat("d", 64)
+	filename := filepath.Base(renderedDebugWebPPath(t.TempDir(), &mbr.ResourceIdResult{
+		ResourceId:   resourceID,
+		SourcePackId: "HYPIXEL_PLUS",
+	}, &renderDebugInfo{
+		SkyBlockID:  strings.Repeat("A", 135),
+		MinecraftID: "minecraft:paper",
+		ItemModel:   strings.Repeat("very_long_item_model_", 20),
+		DisplayName: strings.Repeat("Very Long Display Name ", 20),
+	}))
+	segments := strings.Split(strings.TrimSuffix(filename, ".webp"), "__")
+	if !containsString(segments, "skyblock="+strings.Repeat("A", 135)) {
+		t.Fatalf("filename %q truncated the primary stable identifier", filename)
+	}
+	if !containsString(segments, "pack=HYPIXEL_PLUS") {
+		t.Fatalf("filename %q truncated the pack identifier", filename)
+	}
+	if containsString(segments, "mc=minecraft_paper") || strings.Contains(filename, "itemmodel=") || strings.Contains(filename, "name=") {
+		t.Fatalf("filename %q retained optional metadata without enough space", filename)
+	}
+	if !strings.HasSuffix(filename, "__hash="+resourceID+".webp") {
+		t.Fatalf("filename %q truncated the resource ID", filename)
+	}
+	if len(filename) > maxRenderedDebugFilenameLength {
+		t.Fatalf("filename length = %d, want <= %d", len(filename), maxRenderedDebugFilenameLength)
+	}
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func TestRenderItemNBTWithPackIDsDoesNotReuseOtherPackCache(t *testing.T) {
