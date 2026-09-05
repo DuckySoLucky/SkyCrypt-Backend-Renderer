@@ -86,7 +86,7 @@ func (m *MinecraftAssetLoader) LoadModelDefinitions(assetsRoot string, overlayRo
 				}
 
 				var definition BlockModelDefinition
-				if err := global.JSON.Unmarshal([]byte(jsonContent), &definition); err != nil {
+				if err := global.JSON.Unmarshal([]byte(StripJSONComments(jsonContent)), &definition); err != nil {
 					fmt.Printf("Error deserializing JSON from file %s: %v\n", file, err)
 					continue
 				}
@@ -341,7 +341,7 @@ func MinecraftAssetLoaderLoadBlockInfos(assetsRoot string, modelDefinitions map[
 				}
 
 				var blockStateData map[string]interface{}
-				if err := global.JSON.Unmarshal([]byte(jsonContent), &blockStateData); err != nil {
+				if err := global.JSON.Unmarshal([]byte(StripJSONComments(jsonContent)), &blockStateData); err != nil {
 					fmt.Printf("Error deserializing JSON from file %s: %v\n", file, err)
 					continue
 				}
@@ -736,7 +736,7 @@ func EnumerateItemDefinitions(assetsRoot string, overlayRoots []string, assetNam
 				continue
 			}
 
-			itemData, err := ParseItemDefinitionJSON([]byte(jsonContent))
+			itemData, err := ParseItemDefinitionJSON([]byte(StripJSONComments(jsonContent)))
 			if err != nil {
 				fmt.Printf("Error deserializing JSON from file %s: %v\n", file, err)
 				continue
