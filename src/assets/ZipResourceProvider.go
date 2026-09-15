@@ -2,7 +2,6 @@ package assets
 
 import (
 	"archive/zip"
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -11,15 +10,17 @@ import (
 	"strings"
 )
 
-// ZipResourceProvider reads all entries from a ZIP archive into memory.
-// It implements the ResourceProvider interface.
+// ZipResourceProvider indexes ZIP entry names and reads entry contents on demand.
 type ZipResourceProvider struct {
-	rootPath    string
-	entryData   map[string][]byte
-	directories map[string]struct{}
+	rootPath     string
+	zipFilePath  string
+	archive      *zip.ReadCloser
+	closeArchive bool
+	entries      map[string]struct{}
+	directories  map[string]struct{}
 }
 
-// NewZipResourceProvider opens a zip file, reads all entries into memory, and closes the archive.
+// NewZipResourceProvider indexes a zip file without decompressing its entries.
 func NewZipResourceProvider(zipFilePath string) *ZipResourceProvider {
 	if strings.TrimSpace(zipFilePath) == "" {
 		panic("zipFilePath cannot be empty")
@@ -36,14 +37,12 @@ func NewZipResourceProvider(zipFilePath string) *ZipResourceProvider {
 	}
 	defer zr.Close()
 
-	entries, dirs, err := buildIndexFromFiles(zr.File)
-	if err != nil {
-		panic(err)
-	}
+	entries, dirs := buildIndexFromFiles(zr.File)
 
 	return &ZipResourceProvider{
 		rootPath:    abs,
-		entryData:   entries,
+		zipFilePath: abs,
+		entries:     entries,
 		directories: dirs,
 	}
 }
@@ -55,22 +54,14 @@ func NewZipResourceProviderFromReader(archive *zip.ReadCloser, displayPath strin
 		return nil, errors.New("archive cannot be nil")
 	}
 
-	entries, dirs, err := buildIndexFromFiles(archive.File)
-	if err != nil {
-		if ownsArchive {
-			archive.Close()
-		}
-		return nil, err
-	}
-
-	if ownsArchive {
-		archive.Close()
-	}
+	entries, dirs := buildIndexFromFiles(archive.File)
 
 	return &ZipResourceProvider{
-		rootPath:    displayPath,
-		entryData:   entries,
-		directories: dirs,
+		rootPath:     displayPath,
+		archive:      archive,
+		closeArchive: ownsArchive,
+		entries:      entries,
+		directories:  dirs,
 	}, nil
 }
 
@@ -83,7 +74,7 @@ func (z *ZipResourceProvider) FileExists(relativePath string) bool {
 	if err != nil {
 		return false
 	}
-	_, ok := z.entryData[normalized]
+	_, ok := z.entries[normalized]
 	return ok
 }
 
@@ -105,11 +96,35 @@ func (z *ZipResourceProvider) OpenRead(relativePath string) (io.ReadCloser, erro
 	if err != nil {
 		return nil, err
 	}
-	data, ok := z.entryData[normalized]
-	if !ok {
+	if _, ok := z.entries[normalized]; !ok {
 		return nil, fmt.Errorf("file not found in ZIP archive: '%s'", relativePath)
 	}
-	return io.NopCloser(bytes.NewReader(data)), nil
+	if z.archive != nil {
+		for _, entry := range z.archive.File {
+			entryPath, entryErr := normalizePath(entry.Name)
+			if entryErr == nil && entryPath == normalized {
+				return entry.Open()
+			}
+		}
+		return nil, fmt.Errorf("file not found in ZIP archive: '%s'", relativePath)
+	}
+	archive, err := zip.OpenReader(z.zipFilePath)
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range archive.File {
+		entryPath, entryErr := normalizePath(entry.Name)
+		if entryErr == nil && entryPath == normalized {
+			reader, openErr := entry.Open()
+			if openErr != nil {
+				_ = archive.Close()
+				return nil, openErr
+			}
+			return &zipEntryReadCloser{ReadCloser: reader, archive: archive}, nil
+		}
+	}
+	_ = archive.Close()
+	return nil, fmt.Errorf("file not found in ZIP archive: '%s'", relativePath)
 }
 
 func (z *ZipResourceProvider) EnumerateFiles(directory, searchPattern string, recursive bool) ([]string, error) {
@@ -124,7 +139,7 @@ func (z *ZipResourceProvider) EnumerateFiles(directory, searchPattern string, re
 	}
 
 	var results []string
-	for path := range z.entryData {
+	for path := range z.entries {
 		if !isWithinDirectory(path, prefix, recursive) {
 			continue
 		}
@@ -177,13 +192,16 @@ func (z *ZipResourceProvider) EnumerateDirectories(directory, searchPattern stri
 }
 
 func (z *ZipResourceProvider) Close() error {
+	if z.closeArchive && z.archive != nil {
+		return z.archive.Close()
+	}
 	return nil
 }
 
 // --- helpers ---
 
-func buildIndexFromFiles(files []*zip.File) (map[string][]byte, map[string]struct{}, error) {
-	entries := make(map[string][]byte)
+func buildIndexFromFiles(files []*zip.File) (map[string]struct{}, map[string]struct{}) {
+	entries := make(map[string]struct{})
 	dirs := make(map[string]struct{})
 
 	for _, f := range files {
@@ -202,24 +220,25 @@ func buildIndexFromFiles(files []*zip.File) (map[string][]byte, map[string]struc
 			continue
 		}
 
-		data, err := readEntryBytes(f)
-		if err != nil {
-			return nil, nil, err
-		}
-		entries[path] = data
+		entries[path] = struct{}{}
 		indexParentDirectories(path, dirs)
 	}
 
-	return entries, dirs, nil
+	return entries, dirs
 }
 
-func readEntryBytes(entry *zip.File) ([]byte, error) {
-	r, err := entry.Open()
-	if err != nil {
-		return nil, err
+type zipEntryReadCloser struct {
+	io.ReadCloser
+	archive *zip.ReadCloser
+}
+
+func (z *zipEntryReadCloser) Close() error {
+	readerErr := z.ReadCloser.Close()
+	archiveErr := z.archive.Close()
+	if readerErr != nil {
+		return readerErr
 	}
-	defer r.Close()
-	return io.ReadAll(r)
+	return archiveErr
 }
 
 func (z *ZipResourceProvider) GetRelativePath(fullRelativePath string, directoryPrefix string) (string, error) {
