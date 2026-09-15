@@ -567,6 +567,9 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) ComputeResourceIdInternal
 	} else if blockModelPath, exists := _minecraftBlockRenderer._blockRegistry.TryGetModel(lookupTarget); exists && strings.TrimSpace(blockModelPath) != "" {
 		modelPath = &blockModelPath
 		model := _minecraftBlockRenderer._modelResolver.Resolve(blockModelPath)
+		if model == nil {
+			return nil
+		}
 		modelPath = &model.Name
 		for _, texture := range _minecraftBlockRenderer.CollectResolvedTextures(model) {
 			resolvedTextures[texture] = struct{}{}

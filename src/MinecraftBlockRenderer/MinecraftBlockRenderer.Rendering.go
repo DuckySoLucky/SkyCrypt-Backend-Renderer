@@ -77,6 +77,10 @@ type CullTarget struct {
 }
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) RenderModel(blockModel *data.BlockModelInstance, options BlockRenderOptions, blockName *string) *image.RGBA {
+	if blockModel == nil {
+		return nil
+	}
+
 	// Ensure sensible defaults for fields that commonly get omitted by callers
 	if options.AdditionalScale == 0 {
 		options.AdditionalScale = 1

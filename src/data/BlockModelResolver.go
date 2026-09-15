@@ -63,11 +63,14 @@ func (resolver *BlockModelResolver) LoadFromMinecraftAssets(assetsPath string, o
 }
 
 func (resolver *BlockModelResolver) Resolve(model string) *BlockModelInstance {
-	if model == "" {
+	if resolver == nil || model == "" {
 		return nil
 	}
 
 	normalizedName := resolver.NormalizeName(model)
+	if _, exists := resolver.Definitions[normalizedName]; !exists {
+		return nil
+	}
 
 	resolver._cacheMu.RLock()
 	if resolver._cache != nil {
@@ -78,7 +81,10 @@ func (resolver *BlockModelResolver) Resolve(model string) *BlockModelInstance {
 	}
 	resolver._cacheMu.RUnlock()
 
-	instance := resolver.ResolveInternal(normalizedName, make(map[string]struct{}))
+	instance, resolved := resolver.resolveInternal(normalizedName, make(map[string]struct{}))
+	if !resolved {
+		return nil
+	}
 
 	resolver._cacheMu.Lock()
 	if resolver._cache == nil {
@@ -99,21 +105,23 @@ func (resolver *BlockModelResolver) TryResolve(model string) (*BlockModelInstanc
 	if resolver == nil || model == "" {
 		return nil, false
 	}
-	normalizedName := resolver.NormalizeName(model)
-	if _, exists := resolver.Definitions[normalizedName]; !exists {
-		return nil, false
-	}
-	return resolver.Resolve(model), true
+	resolved := resolver.Resolve(model)
+	return resolved, resolved != nil
 }
 
 func (resolver *BlockModelResolver) ResolveInternal(model string, stack map[string]struct{}) BlockModelInstance {
+	instance, _ := resolver.resolveInternal(model, stack)
+	return instance
+}
+
+func (resolver *BlockModelResolver) resolveInternal(model string, stack map[string]struct{}) (BlockModelInstance, bool) {
 	if _, exists := stack[model]; exists {
 		panic(fmt.Sprintf("Detected circular model inheritance involving '%s'.", model))
 	}
 
 	definition, exists := resolver.Definitions[model]
 	if !exists {
-		panic(fmt.Sprintf("Model '%s' was not found in the loaded definitions.", model))
+		return BlockModelInstance{}, false
 	}
 
 	stack[model] = struct{}{}
@@ -124,7 +132,11 @@ func (resolver *BlockModelResolver) ResolveInternal(model string, stack map[stri
 	var elements []ModelElement
 
 	if definition.Parent != nil && *definition.Parent != "" {
-		parent := resolver.ResolveInternal(resolver.NormalizeName(*definition.Parent), stack)
+		parent, resolved := resolver.resolveInternal(resolver.NormalizeName(*definition.Parent), stack)
+		if !resolved {
+			delete(stack, model)
+			return BlockModelInstance{}, false
+		}
 		parentChain = append(parentChain, parent.ParentChain...)
 		parentChain = append(parentChain, parent.Name)
 
@@ -169,7 +181,7 @@ func (resolver *BlockModelResolver) ResolveInternal(model string, stack map[stri
 		Textures:    textures,
 		Display:     display,
 		Elements:    elements,
-	}
+	}, true
 }
 
 func (resolver *BlockModelResolver) CloneElement(element ModelElement) ModelElement {

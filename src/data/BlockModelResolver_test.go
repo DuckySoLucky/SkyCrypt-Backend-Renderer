@@ -45,6 +45,27 @@ func TestResolveInternalChildElementsReplaceParentElements(t *testing.T) {
 	}
 }
 
+func TestResolveMissingModelReturnsNil(t *testing.T) {
+	resolver := NewBlockModelResolver(map[string]BlockModelDefinition{})
+
+	if resolved := resolver.Resolve("betterleaves:block/leaves"); resolved != nil {
+		t.Fatalf("missing model resolved to %+v, want nil", resolved)
+	}
+	if resolved, exists := resolver.TryResolve("betterleaves:block/leaves"); exists || resolved != nil {
+		t.Fatalf("TryResolve missing model = (%+v, %t), want (nil, false)", resolved, exists)
+	}
+}
+
+func TestResolveMissingParentReturnsNil(t *testing.T) {
+	resolver := NewBlockModelResolver(map[string]BlockModelDefinition{
+		"betterleaves:block/leaves": {Parent: stringPtr("betterleaves:block/missing")},
+	})
+
+	if resolved := resolver.Resolve("betterleaves:block/leaves"); resolved != nil {
+		t.Fatalf("model with missing parent resolved to %+v, want nil", resolved)
+	}
+}
+
 func stringPtr(value string) *string {
 	return &value
 }
