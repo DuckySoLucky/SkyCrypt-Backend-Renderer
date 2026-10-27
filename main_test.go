@@ -230,6 +230,46 @@ func containsString(values []string, target string) bool {
 	return false
 }
 
+func TestPackStackRendererIsBuiltOnceUnderConcurrency(t *testing.T) {
+	assetsRoot := createRootMinimalAssets(t)
+	resourcePacksRoot := t.TempDir()
+	createSolidSkyblockPack(t, resourcePacksRoot, "HYPIXEL_PLUS", color.RGBA{R: 220, G: 40, B: 40, A: 255})
+	createSolidSkyblockPack(t, resourcePacksRoot, "HYPIXEL_PACK", color.RGBA{R: 40, G: 80, B: 220, A: 255})
+	renderer, err := NewRenderer(Options{
+		AssetsRoot:        assetsRoot,
+		ResourcePacksRoot: resourcePacksRoot,
+		PackIDs:           []string{"HYPIXEL_PLUS", "HYPIXEL_PACK"},
+		CacheDir:          filepath.Join(t.TempDir(), "cache"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const workers = 16
+	results := make([]*mbr.MinecraftBlockRenderer, workers)
+	var wg sync.WaitGroup
+	for i := range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[i] = renderer.MinecraftRenderer().GetRendererForPackStack([]string{"HYPIXEL_PACK"})
+		}()
+	}
+	wg.Wait()
+	for i, result := range results {
+		if result == nil || result != results[0] {
+			t.Fatalf("worker %d got pack renderer %p, want the shared %p", i, result, results[0])
+		}
+	}
+
+	if err := renderer.MinecraftRenderer().ReloadResourcePacks(); err != nil {
+		t.Fatal(err)
+	}
+	if reloaded := renderer.MinecraftRenderer().GetRendererForPackStack([]string{"HYPIXEL_PACK"}); reloaded == results[0] {
+		t.Fatal("pack renderer survived ReloadResourcePacks")
+	}
+}
+
 func TestRenderItemNBTWithPackIDsDoesNotReuseOtherPackCache(t *testing.T) {
 	assetsRoot := createRootMinimalAssets(t)
 	resourcePacksRoot := t.TempDir()

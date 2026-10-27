@@ -274,7 +274,36 @@ func decodedValueToMap(input any) (map[string]any, bool) {
 	if input == nil {
 		return nil, false
 	}
+	// Item input is usually already decoded JSON. Copying such a tree through reflection yields an identical
+	// tree, so hand it back as is; the copy was most of the cost of every render lookup.
+	if typed, ok := input.(map[string]any); ok && isPlainDecodedValue(typed) {
+		return typed, true
+	}
 	return reflectValueToMap(reflect.ValueOf(input))
+}
+
+// isPlainDecodedValue reports whether reflectValueToAny would return value unchanged.
+func isPlainDecodedValue(value any) bool {
+	switch typed := value.(type) {
+	case nil, string, bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		return true
+	case map[string]any:
+		for _, item := range typed {
+			if !isPlainDecodedValue(item) {
+				return false
+			}
+		}
+		return true
+	case []any:
+		for _, item := range typed {
+			if !isPlainDecodedValue(item) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
 }
 
 func reflectValueToMap(value reflect.Value) (map[string]any, bool) {

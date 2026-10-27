@@ -3,9 +3,11 @@ package assets
 import (
 	"bytes"
 	"compress/gzip"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 )
 
 // private const uint Magic = 0x43415453; // "CATS" in ASCII
@@ -123,13 +125,7 @@ func (c *CatsFile) OpenStream(entry *CatsFileEntry) (io.ReadSeeker, error) {
 	entryData := c._data[absoluteOffset : absoluteOffset+entry.Size]
 
 	if entry.Compression == CompressionGzip {
-		gzipReader, err := gzip.NewReader(bytes.NewReader(entryData))
-		if err != nil {
-			return nil, err
-		}
-		defer gzipReader.Close()
-
-		decompressed, err := io.ReadAll(gzipReader)
+		decompressed, err := gunzipEntry(entryData)
 		if err != nil {
 			return nil, err
 		}
@@ -138,6 +134,42 @@ func (c *CatsFile) OpenStream(entry *CatsFileEntry) (io.ReadSeeker, error) {
 	}
 
 	return bytes.NewReader(entryData), nil
+}
+
+// Loading a pack stack inflates every archive entry; a fresh gzip.Reader allocates its 32KB window and tables each
+// time, which dominated pack load allocations.
+var gzipReaderPool sync.Pool
+
+// maxGzipSizeHint caps the preallocation taken from the gzip trailer, which a corrupt entry could set to anything.
+const maxGzipSizeHint = 64 << 20
+
+func gunzipEntry(compressed []byte) ([]byte, error) {
+	source := bytes.NewReader(compressed)
+	gzipReader, _ := gzipReaderPool.Get().(*gzip.Reader)
+	var err error
+	if gzipReader == nil {
+		gzipReader, err = gzip.NewReader(source)
+	} else {
+		err = gzipReader.Reset(source)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer gzipReaderPool.Put(gzipReader)
+
+	// The trailer holds the uncompressed size (mod 2^32), so the output is usually allocated once.
+	sizeHint := 0
+	if len(compressed) >= 4 {
+		sizeHint = int(binary.LittleEndian.Uint32(compressed[len(compressed)-4:]))
+	}
+	if sizeHint <= 0 || sizeHint > maxGzipSizeHint {
+		sizeHint = 2 * len(compressed)
+	}
+	output := bytes.NewBuffer(make([]byte, 0, sizeHint+bytes.MinRead))
+	if _, err := output.ReadFrom(gzipReader); err != nil {
+		return nil, err
+	}
+	return output.Bytes(), nil
 }
 
 func (c *CatsFile) ParseDirectory(offset *int) *CatsDirectoryEntry {

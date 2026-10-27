@@ -334,9 +334,12 @@ func (renderer *MinecraftBlockRenderer) ReloadResourcePacks() error {
 		}
 		registry.RegisterAllPacks(source.Path, source.SearchRecursively)
 	}
-	renderer._packRegistry = registry
 	renderer._packRendererCacheMu.Lock()
+	renderer._packRegistry = registry
 	renderer._packRendererCache = make(map[string]*MinecraftBlockRenderer)
+	renderer._packRendererByIds = nil
+	renderer._packRendererInflight = nil
+	renderer._packRendererGeneration++
 	renderer._packRendererCacheMu.Unlock()
 	renderer._skyblockItemDefinitionsMu.Lock()
 	renderer._skyblockItemDefinitions = nil

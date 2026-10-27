@@ -5,8 +5,10 @@ import (
 	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/assets"
 	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/global"
 	"image/color"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -434,8 +436,9 @@ func ResolveFromVariants(variants map[string]interface{}, modelDefinitions map[s
 		}
 	}
 
-	for _, propertyValue := range variants {
-		modelRef := ExtractModelReference(propertyValue)
+	// Sorted: ranging over the map picked a random variant, so a block could render differently on each start.
+	for _, variantKey := range slices.Sorted(maps.Keys(variants)) {
+		modelRef := ExtractModelReference(variants[variantKey])
 		if normalized, exists := ModelExists(modelRef, modelDefinitions); exists {
 			formatted := FormatModelReference(modelRef, normalized)
 			return &formatted
@@ -592,8 +595,8 @@ func ResolvePrimaryTexture(definition BlockModelDefinition, models map[string]Bl
 			}
 		}
 
-		for _, value := range definition.Textures {
-			if strings.TrimSpace(value) != "" {
+		for _, textureKey := range slices.Sorted(maps.Keys(definition.Textures)) {
+			if value := definition.Textures[textureKey]; strings.TrimSpace(value) != "" {
 				return &value
 			}
 		}

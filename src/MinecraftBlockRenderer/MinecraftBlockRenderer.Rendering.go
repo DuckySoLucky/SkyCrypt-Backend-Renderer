@@ -594,9 +594,9 @@ func RasterizeTriangle(
 			texX := int(math.Max(0, math.Min(float64(texCoord.X*float64(textureRect.Dx())), float64(texWidth))))
 			texY := int(math.Max(0, math.Min(float64(texCoord.Y*float64(textureRect.Dy())), float64(texHeight))))
 
-			color := texture.At(textureRect.Min.X+texX, textureRect.Min.Y+texY)
-			_, _, _, a := color.RGBA()
-			if a>>8 <= alphaThreshold {
+			// RGBAAt avoids boxing a color.Color for every covered pixel.
+			color := texture.RGBAAt(textureRect.Min.X+texX, textureRect.Min.Y+texY)
+			if color.A <= alphaThreshold {
 				continue
 			}
 
@@ -608,9 +608,9 @@ func RasterizeTriangle(
 			depthBuffer[bufferIndex] = depth
 
 			if shadingFactor >= 0.999 && shadingFactor <= 1.001 {
-				canvas.Set(x, y, color)
+				canvas.SetRGBA(x, y, color)
 			} else {
-				canvas.Set(x, y, ApplyShading(color, shadingFactor))
+				canvas.SetRGBA(x, y, applyShadingRGBA(color, shadingFactor))
 			}
 		}
 	}
@@ -626,6 +626,23 @@ func GetBarycentric(p1, p src.Vector2, bdata BarycentricData) data.Vector3 {
 	u := 1 - v - w
 
 	return data.Vector3{X: u, Y: v, Z: w}
+}
+
+// applyShadingRGBA is ApplyShading for a color.RGBA, without the interface conversions.
+func applyShadingRGBA(original color.RGBA, shadingFactor float64) color.RGBA {
+	factor := shadingFactor
+	if factor < 0 {
+		factor = 0
+	}
+	if math.Abs(factor-1) <= 1e-4 {
+		return original
+	}
+	return color.RGBA{
+		R: uint8(float64(original.R) * factor),
+		G: uint8(float64(original.G) * factor),
+		B: uint8(float64(original.B) * factor),
+		A: original.A,
+	}
 }
 
 func ApplyShading(original color.Color, shadingFactor float64) color.RGBA {

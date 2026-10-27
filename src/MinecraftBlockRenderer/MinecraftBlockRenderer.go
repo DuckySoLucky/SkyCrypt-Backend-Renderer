@@ -96,6 +96,15 @@ type MinecraftBlockRenderer struct {
 	_playerSkinCacheMu         sync.RWMutex
 	_skyblockItemDefinitions   map[string]skyblockItemDefinitionCacheEntry
 	_skyblockItemDefinitionsMu sync.RWMutex
+
+	// Guarded by _packRendererCacheMu.
+	_packRendererInflight   map[string]*packRendererBuild
+	_packRendererByIds      map[string]*MinecraftBlockRenderer
+	_packRendererGeneration uint64
+
+	// Pack contents are fixed once a renderer is built, so pack attribution lookups are memoized.
+	_assetSourcePackCache sync.Map // category|extension|assetId -> assetSourcePack
+	_sourcePackIdCache    sync.Map // model|sorted textures -> string
 }
 
 type ItemRenderData = data.ItemRenderData

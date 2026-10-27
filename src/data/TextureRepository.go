@@ -36,12 +36,20 @@ type TextureRepository struct {
 	GrassColorMap      *image.RGBA
 	FoliageColorMap    *image.RGBA
 	DryFoliageColorMap *image.RGBA
+
+	// Serializes WithAnimationOverride. Interleaved overrides restored each other's state out of order and could
+	// leave a frame override installed for every later render.
+	_animationRenderMu sync.Mutex
+	// Tinted variants are keyed by colour, which is unbounded (dyed leather), so they live apart from the base
+	// textures with a size cap; the derived disk cache backs them. Guarded by _cacheMu.
+	_tintCache map[string]image.RGBA
 }
 
 func NewTextureRepository(dataRoot string, embeddedTextureFile *string, overlayRoots []string, assetNamespaces assets.AssetNamespaceRegistry) *TextureRepository {
 	_textureRepository := &TextureRepository{
 		_assetNamespaces: assetNamespaces,
 		_cache:           make(map[string]image.RGBA),
+		_tintCache:       make(map[string]image.RGBA),
 		_embedded:        make(map[string]string),
 		_animationCache:  make(map[string]TextureAnimation),
 	}
@@ -163,6 +171,8 @@ func (_textureRepository *TextureRepository) WithAnimationOverride(override *Ani
 	if _textureRepository == nil || render == nil {
 		return
 	}
+	_textureRepository._animationRenderMu.Lock()
+	defer _textureRepository._animationRenderMu.Unlock()
 	_textureRepository._animationOverrideMu.Lock()
 	previous := _textureRepository._activeAnimationOverride
 	_textureRepository._activeAnimationOverride = override
@@ -1173,7 +1183,7 @@ func (_textureRepository *TextureRepository) GetTintedTexture(textureId string, 
 	}
 
 	_textureRepository._cacheMu.RLock()
-	if cached, found := _textureRepository._cache[cacheKey]; found {
+	if cached, found := _textureRepository._tintCache[cacheKey]; found {
 		_textureRepository._cacheMu.RUnlock()
 		return &cached
 	}
@@ -1181,11 +1191,11 @@ func (_textureRepository *TextureRepository) GetTintedTexture(textureId string, 
 
 	if cached, ok := _textureRepository.tryReadDerivedTexture("tint|" + cacheKey); ok {
 		_textureRepository._cacheMu.Lock()
-		if existing, found := _textureRepository._cache[cacheKey]; found {
+		if existing, found := _textureRepository._tintCache[cacheKey]; found {
 			_textureRepository._cacheMu.Unlock()
 			return &existing
 		}
-		_textureRepository._cache[cacheKey] = *cached
+		_textureRepository.storeTintedTexture(cacheKey, *cached)
 		_textureRepository._cacheMu.Unlock()
 		return cached
 	}
@@ -1193,7 +1203,7 @@ func (_textureRepository *TextureRepository) GetTintedTexture(textureId string, 
 	original := _textureRepository.GetTexture(textureId)
 	if original == nil || sameRGBA(*original, _textureRepository._missingTexture) {
 		_textureRepository._cacheMu.Lock()
-		_textureRepository._cache[cacheKey] = _textureRepository._missingTexture
+		_textureRepository.storeTintedTexture(cacheKey, _textureRepository._missingTexture)
 		_textureRepository._cacheMu.Unlock()
 		return &_textureRepository._missingTexture
 	}
@@ -1235,14 +1245,33 @@ func (_textureRepository *TextureRepository) GetTintedTexture(textureId string, 
 	}
 
 	_textureRepository._cacheMu.Lock()
-	if cached, found := _textureRepository._cache[cacheKey]; found {
+	if cached, found := _textureRepository._tintCache[cacheKey]; found {
 		_textureRepository._cacheMu.Unlock()
 		return &cached
 	}
-	_textureRepository._cache[cacheKey] = *tinted
+	_textureRepository.storeTintedTexture(cacheKey, *tinted)
 	_textureRepository._cacheMu.Unlock()
 	_textureRepository.tryWriteDerivedTexture("tint|"+cacheKey, tinted)
 	return tinted
+}
+
+// maxTintCacheEntries bounds in-memory tinted variants; evicted ones are re-read from the derived disk cache.
+const maxTintCacheEntries = 4096
+
+// storeTintedTexture must be called with _cacheMu held for writing.
+func (_textureRepository *TextureRepository) storeTintedTexture(cacheKey string, texture image.RGBA) {
+	if _textureRepository._tintCache == nil {
+		_textureRepository._tintCache = make(map[string]image.RGBA)
+	}
+	if len(_textureRepository._tintCache) >= maxTintCacheEntries {
+		for key := range _textureRepository._tintCache {
+			delete(_textureRepository._tintCache, key)
+			if len(_textureRepository._tintCache) < maxTintCacheEntries*3/4 {
+				break
+			}
+		}
+	}
+	_textureRepository._tintCache[cacheKey] = texture
 }
 
 func LoadImageFromStream(stream io.Reader) (*image.RGBA, error) {

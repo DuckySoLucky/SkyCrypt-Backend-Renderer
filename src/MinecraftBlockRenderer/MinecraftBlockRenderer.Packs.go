@@ -331,28 +331,82 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) GetRendererForPackStack(p
 		panic("Texture pack rendering requires a renderer created from Minecraft assets (not aggregated data files).")
 	}
 
-	packStack := _minecraftBlockRenderer._packRegistry.BuildPackStack(packIds)
-	return _minecraftBlockRenderer.GetRendererForPackStackWithContext(packStack)
-}
-
-func (_minecraftBlockRenderer *MinecraftBlockRenderer) GetRendererForPackStackWithContext(packStack *texturepacks.TexturePackStack) *MinecraftBlockRenderer {
+	// Every render resolves its pack stack; building it hashes every pack fingerprint, so remember it per id list.
+	idsKey := strings.Join(packIds, "\x00")
 	_minecraftBlockRenderer._packRendererCacheMu.Lock()
-	defer _minecraftBlockRenderer._packRendererCacheMu.Unlock()
-
-	if _minecraftBlockRenderer._packRendererCache == nil {
-		_minecraftBlockRenderer._packRendererCache = make(map[string]*MinecraftBlockRenderer)
-	}
-
-	cacheKey := packStack.Fingerprint
-	if cached, exists := _minecraftBlockRenderer._packRendererCache[cacheKey]; exists {
+	cached, exists := _minecraftBlockRenderer._packRendererByIds[idsKey]
+	generation := _minecraftBlockRenderer._packRendererGeneration
+	packRegistry := _minecraftBlockRenderer._packRegistry
+	_minecraftBlockRenderer._packRendererCacheMu.Unlock()
+	if exists {
 		return cached
 	}
 
-	renderer := _minecraftBlockRenderer.CreatePackRenderer(packStack)
-	// fmt.Printf("cacheKey: %+v\nrendered: %+v\n", cacheKey, renderer != nil)
+	packStack := packRegistry.BuildPackStack(packIds)
+	renderer := _minecraftBlockRenderer.GetRendererForPackStackWithContext(packStack)
 
-	_minecraftBlockRenderer._packRendererCache[cacheKey] = renderer
+	_minecraftBlockRenderer._packRendererCacheMu.Lock()
+	defer _minecraftBlockRenderer._packRendererCacheMu.Unlock()
+	if generation != _minecraftBlockRenderer._packRendererGeneration {
+		return renderer
+	}
+	if _minecraftBlockRenderer._packRendererByIds == nil {
+		_minecraftBlockRenderer._packRendererByIds = make(map[string]*MinecraftBlockRenderer)
+	}
+	_minecraftBlockRenderer._packRendererByIds[idsKey] = renderer
 	return renderer
+}
+
+type packRendererBuild struct {
+	done     chan struct{}
+	renderer *MinecraftBlockRenderer
+}
+
+func (_minecraftBlockRenderer *MinecraftBlockRenderer) GetRendererForPackStackWithContext(packStack *texturepacks.TexturePackStack) *MinecraftBlockRenderer {
+	cacheKey := packStack.Fingerprint
+
+	_minecraftBlockRenderer._packRendererCacheMu.Lock()
+	if _minecraftBlockRenderer._packRendererCache == nil {
+		_minecraftBlockRenderer._packRendererCache = make(map[string]*MinecraftBlockRenderer)
+	}
+	if cached, exists := _minecraftBlockRenderer._packRendererCache[cacheKey]; exists {
+		_minecraftBlockRenderer._packRendererCacheMu.Unlock()
+		return cached
+	}
+	// Building a pack renderer loads every model and item definition and can take seconds. Build it outside the
+	// lock so requests for stacks that are already loaded are not stuck behind it; callers asking for the same
+	// stack wait for the one build.
+	if build, exists := _minecraftBlockRenderer._packRendererInflight[cacheKey]; exists {
+		_minecraftBlockRenderer._packRendererCacheMu.Unlock()
+		<-build.done
+		if build.renderer == nil {
+			// The build panicked; retry so this caller gets the same panic rather than a nil renderer.
+			return _minecraftBlockRenderer.GetRendererForPackStackWithContext(packStack)
+		}
+		return build.renderer
+	}
+	build := &packRendererBuild{done: make(chan struct{})}
+	if _minecraftBlockRenderer._packRendererInflight == nil {
+		_minecraftBlockRenderer._packRendererInflight = make(map[string]*packRendererBuild)
+	}
+	_minecraftBlockRenderer._packRendererInflight[cacheKey] = build
+	generation := _minecraftBlockRenderer._packRendererGeneration
+	_minecraftBlockRenderer._packRendererCacheMu.Unlock()
+
+	defer func() {
+		_minecraftBlockRenderer._packRendererCacheMu.Lock()
+		if _minecraftBlockRenderer._packRendererInflight[cacheKey] == build {
+			delete(_minecraftBlockRenderer._packRendererInflight, cacheKey)
+		}
+		// A reload during the build swapped the registry; don't publish a renderer built from the old one.
+		if build.renderer != nil && generation == _minecraftBlockRenderer._packRendererGeneration {
+			_minecraftBlockRenderer._packRendererCache[cacheKey] = build.renderer
+		}
+		_minecraftBlockRenderer._packRendererCacheMu.Unlock()
+		close(build.done)
+	}()
+	build.renderer = _minecraftBlockRenderer.CreatePackRenderer(packStack)
+	return build.renderer
 }
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) CreatePackRenderer(packStack *texturepacks.TexturePackStack) *MinecraftBlockRenderer {
@@ -600,6 +654,9 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) ComputeResourceIdInternal
 	for texture := range resolvedTextures {
 		textures = append(textures, texture)
 	}
+	// Sorted so the rendered filename (it lists the first textures) is the same on every run; map order made the
+	// same render miss its file after a restart and get written again under a new name.
+	sort.Strings(textures)
 
 	return &ResourceIdResult{
 		ResourceId:    resourceId,
@@ -916,13 +973,37 @@ func isResourceRelevantCustomDataKey(key string) bool {
 }
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) DetermineSourcePackId(modelPath *string, textureIds map[string]struct{}) string {
+	// Map order is random, so walk textures sorted: the same item must always credit the same pack.
+	sortedTextureIds := make([]string, 0, len(textureIds))
+	for textureId := range textureIds {
+		sortedTextureIds = append(sortedTextureIds, textureId)
+	}
+	sort.Strings(sortedTextureIds)
+
+	var cacheKey strings.Builder
+	if modelPath != nil {
+		cacheKey.WriteString(*modelPath)
+	}
+	for _, textureId := range sortedTextureIds {
+		cacheKey.WriteByte(0)
+		cacheKey.WriteString(textureId)
+	}
+	if cached, ok := _minecraftBlockRenderer._sourcePackIdCache.Load(cacheKey.String()); ok {
+		return cached.(string)
+	}
+	packId := _minecraftBlockRenderer.determineSourcePackIdUncached(modelPath, sortedTextureIds)
+	_minecraftBlockRenderer._sourcePackIdCache.Store(cacheKey.String(), packId)
+	return packId
+}
+
+func (_minecraftBlockRenderer *MinecraftBlockRenderer) determineSourcePackIdUncached(modelPath *string, textureIds []string) string {
 	if modelPath != nil {
 		if packId, exists := _minecraftBlockRenderer.TryResolvePackFromAsset(*modelPath, "models", ".json"); exists {
 			return packId
 		}
 	}
 
-	for textureId := range textureIds {
+	for _, textureId := range textureIds {
 		if packId, exists := _minecraftBlockRenderer.TryResolvePackFromAsset(textureId, "textures", ".png"); exists {
 			return packId
 		}
@@ -946,7 +1027,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) DetermineSourcePackId(mod
 		}
 	}
 
-	for textureId := range textureIds {
+	for _, textureId := range textureIds {
 		normalizedTexture := _minecraftBlockRenderer.NormalizeTexturePath(textureId)
 		if strings.TrimSpace(normalizedTexture) == "" {
 			continue
@@ -988,7 +1069,23 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) NormalizeModelPath(modelP
 	return normalized
 }
 
+type assetSourcePack struct {
+	packId string
+	found  bool
+}
+
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryResolvePackFromAsset(assetId string, category string, extension string) (string, bool) {
+	cacheKey := category + "|" + extension + "|" + assetId
+	if cached, ok := _minecraftBlockRenderer._assetSourcePackCache.Load(cacheKey); ok {
+		result := cached.(assetSourcePack)
+		return result.packId, result.found
+	}
+	packId, found := _minecraftBlockRenderer.tryResolvePackFromAssetUncached(assetId, category, extension)
+	_minecraftBlockRenderer._assetSourcePackCache.Store(cacheKey, assetSourcePack{packId: packId, found: found})
+	return packId, found
+}
+
+func (_minecraftBlockRenderer *MinecraftBlockRenderer) tryResolvePackFromAssetUncached(assetId string, category string, extension string) (string, bool) {
 	packId := VanillaPackId
 	if strings.TrimSpace(assetId) == "" {
 		return packId, false
@@ -1026,7 +1123,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryResolvePackFromAsset(a
 		}
 
 		// Check provider-backed roots (e.g. .cats archives or ZIP packs)
-		if root.Provider != nil && fmt.Sprintf("%T", root.Provider) != "*assets.DirectoryResourceProvider" {
+		if root.Provider != nil && !isDirectoryResourceProvider(*root.Provider) {
 			providerRelative := strings.ReplaceAll(relativePath, string(filepath.Separator), "/")
 			var providerCandidate string
 			if strings.HasSuffix(basePath, category) {
@@ -1042,6 +1139,11 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryResolvePackFromAsset(a
 	}
 
 	return packId, false
+}
+
+func isDirectoryResourceProvider(provider assets.ResourceProvider) bool {
+	_, ok := provider.(*assets.DirectoryResourceProvider)
+	return ok
 }
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) NormalizeAssetPath(assetId string) (string, string) {

@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src"
@@ -1444,6 +1445,11 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryDecodeSkinPayload(enco
 	return candidate, true
 }
 
+const maxPlayerSkinCacheEntries = 2048
+
+// The shared client has no timeout; a stalled skin download would hang the render and every request waiting on it.
+var playerSkinHTTPClient = &http.Client{Timeout: 15 * time.Second}
+
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryLoadSkinFromURL(rawURL string) (image.RGBA, error) {
 	normalized, ok := _minecraftBlockRenderer.TryNormalizeSkinURL(rawURL)
 	if !ok {
@@ -1474,6 +1480,15 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryLoadSkinFromURL(rawURL
 	_minecraftBlockRenderer._playerSkinCacheMu.Lock()
 	if _minecraftBlockRenderer._playerSkinCache == nil {
 		_minecraftBlockRenderer._playerSkinCache = make(map[string]*image.RGBA)
+	}
+	// Every distinct head adds a skin, so cap the map; evicted skins come back from the player_skins disk cache.
+	if len(_minecraftBlockRenderer._playerSkinCache) >= maxPlayerSkinCacheEntries {
+		for key := range _minecraftBlockRenderer._playerSkinCache {
+			delete(_minecraftBlockRenderer._playerSkinCache, key)
+			if len(_minecraftBlockRenderer._playerSkinCache) < maxPlayerSkinCacheEntries*3/4 {
+				break
+			}
+		}
 	}
 	_minecraftBlockRenderer._playerSkinCache[normalized] = &skinCopy
 	_minecraftBlockRenderer._playerSkinCacheMu.Unlock()
@@ -1525,7 +1540,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) TryLoadSkinFromDisk(norma
 }
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) DownloadPlayerSkin(normalizedURL string) (image.RGBA, error) {
-	response, err := global.HTTP_CLIENT.Get(normalizedURL)
+	response, err := playerSkinHTTPClient.Get(normalizedURL)
 	if err != nil {
 		return image.RGBA{}, err
 	}
@@ -2241,13 +2256,13 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) ApplyLayerTint(img *image
 
 	for y := 0; y < img.Bounds().Dy(); y++ {
 		for x := 0; x < img.Bounds().Dx(); x++ {
-			pixel := img.At(x, y).(color.RGBA)
+			pixel := img.RGBAAt(x, y)
 			alpha := float64(pixel.A) / 255.0
 			r := math.Min(float64(pixel.R)/255.0*tintVector.R, 1.0)
 			g := math.Min(float64(pixel.G)/255.0*tintVector.G, 1.0)
 			b := math.Min(float64(pixel.B)/255.0*tintVector.B, 1.0)
 			a := alpha * tintVector.A
-			img.Set(x, y, color.RGBA{
+			img.SetRGBA(x, y, color.RGBA{
 				R: uint8(r * 255.0),
 				G: uint8(g * 255.0),
 				B: uint8(b * 255.0),

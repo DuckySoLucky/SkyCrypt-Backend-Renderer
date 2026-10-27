@@ -10,6 +10,8 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf16"
 )
 
 type NbtParser struct{}
@@ -390,11 +392,14 @@ func (p *NbtBinaryReader) ReadString() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if length <= 0 {
+	// The length is an unsigned short; read as signed, strings over 32767 bytes were skipped unread and the
+	// rest of the stream was parsed from the middle of the string.
+	byteLength := int(uint16(length))
+	if byteLength == 0 {
 		return "", nil
 	}
 
-	buffer := make([]byte, int(length))
+	buffer := make([]byte, byteLength)
 	err = readExactly(p.stream, buffer)
 	if err != nil {
 		return "", err
@@ -424,7 +429,8 @@ func decodeMutf8(data []byte) (string, error) {
 				return "", errors.New("invalid MUTF-8 continuation byte")
 			}
 
-			codePoint := rune((b1&0x1F)<<6 | (b2 & 0x3F))
+			// Shift as runes: shifting the bytes dropped the high bits of anything above U+00FF.
+			codePoint := rune(b1&0x1F)<<6 | rune(b2&0x3F)
 			chars = append(chars, codePoint)
 			continue
 		}
@@ -440,7 +446,14 @@ func decodeMutf8(data []byte) (string, error) {
 				return "", errors.New("invalid MUTF-8 continuation byte")
 			}
 
-			codePoint := rune((b1&0x0F)<<12 | (b2&0x3F)<<6 | (b3 & 0x3F))
+			codePoint := rune(b1&0x0F)<<12 | rune(b2&0x3F)<<6 | rune(b3&0x3F)
+			// Modified UTF-8 stores characters outside the BMP as two encoded UTF-16 surrogates.
+			if len(chars) > 0 && utf16.IsSurrogate(codePoint) {
+				if combined := utf16.DecodeRune(chars[len(chars)-1], codePoint); combined != unicode.ReplacementChar {
+					chars[len(chars)-1] = combined
+					continue
+				}
+			}
 			chars = append(chars, codePoint)
 			continue
 		}
