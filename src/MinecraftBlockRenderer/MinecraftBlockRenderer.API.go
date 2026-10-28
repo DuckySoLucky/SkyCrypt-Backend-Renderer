@@ -339,6 +339,7 @@ func (renderer *MinecraftBlockRenderer) ReloadResourcePacks() error {
 	renderer._packRendererCache = make(map[string]*MinecraftBlockRenderer)
 	renderer._packRendererByIds = nil
 	renderer._packRendererInflight = nil
+	renderer._packRendererRecency = nil
 	renderer._packRendererGeneration++
 	renderer._packRendererCacheMu.Unlock()
 	renderer._skyblockItemDefinitionsMu.Lock()

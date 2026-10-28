@@ -101,6 +101,8 @@ type MinecraftBlockRenderer struct {
 	_packRendererInflight   map[string]*packRendererBuild
 	_packRendererByIds      map[string]*MinecraftBlockRenderer
 	_packRendererGeneration uint64
+	// Cached pack renderers, least recently used first; see maxPackRenderers.
+	_packRendererRecency []*MinecraftBlockRenderer
 
 	// Pack contents are fixed once a renderer is built, so pack attribution lookups are memoized.
 	_assetSourcePackCache sync.Map // category|extension|assetId -> assetSourcePack

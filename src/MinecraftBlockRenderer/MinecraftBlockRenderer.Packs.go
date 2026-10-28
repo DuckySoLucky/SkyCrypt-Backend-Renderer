@@ -15,6 +15,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -339,6 +340,9 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) GetRendererForPackStack(p
 	packRegistry := _minecraftBlockRenderer._packRegistry
 	_minecraftBlockRenderer._packRendererCacheMu.Unlock()
 	if exists {
+		_minecraftBlockRenderer._packRendererCacheMu.Lock()
+		_minecraftBlockRenderer.touchPackRendererLocked(cached)
+		_minecraftBlockRenderer._packRendererCacheMu.Unlock()
 		return cached
 	}
 
@@ -350,11 +354,54 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) GetRendererForPackStack(p
 	if generation != _minecraftBlockRenderer._packRendererGeneration {
 		return renderer
 	}
+	// Only remember renderers still cached: one evicted in the meantime would otherwise stay reachable from here.
+	if !slices.Contains(_minecraftBlockRenderer._packRendererRecency, renderer) {
+		return renderer
+	}
 	if _minecraftBlockRenderer._packRendererByIds == nil {
 		_minecraftBlockRenderer._packRendererByIds = make(map[string]*MinecraftBlockRenderer)
 	}
 	_minecraftBlockRenderer._packRendererByIds[idsKey] = renderer
 	return renderer
+}
+
+// maxPackRenderers bounds the pack renderers one renderer keeps. Each loads every model and item definition of its
+// stack (tens of MB), and users choose both which packs they enable and their order, so the possible stacks grow
+// with every pack added. The least recently used one is dropped and built again if it is asked for later.
+const maxPackRenderers = 8
+
+// touchPackRendererLocked marks renderer as just used. The caller holds _packRendererCacheMu.
+func (_minecraftBlockRenderer *MinecraftBlockRenderer) touchPackRendererLocked(renderer *MinecraftBlockRenderer) {
+	recency := _minecraftBlockRenderer._packRendererRecency
+	for i, cached := range recency {
+		if cached == renderer {
+			if i == len(recency)-1 {
+				return
+			}
+			recency = append(recency[:i], recency[i+1:]...)
+			break
+		}
+	}
+	_minecraftBlockRenderer._packRendererRecency = append(recency, renderer)
+}
+
+// evictPackRenderersLocked drops the least recently used pack renderers past maxPackRenderers, with every pack id
+// list that pointed at them. The caller holds _packRendererCacheMu.
+func (_minecraftBlockRenderer *MinecraftBlockRenderer) evictPackRenderersLocked() {
+	for len(_minecraftBlockRenderer._packRendererRecency) > maxPackRenderers {
+		oldest := _minecraftBlockRenderer._packRendererRecency[0]
+		_minecraftBlockRenderer._packRendererRecency = _minecraftBlockRenderer._packRendererRecency[1:]
+		for key, cached := range _minecraftBlockRenderer._packRendererCache {
+			if cached == oldest {
+				delete(_minecraftBlockRenderer._packRendererCache, key)
+			}
+		}
+		for key, cached := range _minecraftBlockRenderer._packRendererByIds {
+			if cached == oldest {
+				delete(_minecraftBlockRenderer._packRendererByIds, key)
+			}
+		}
+	}
 }
 
 type packRendererBuild struct {
@@ -370,6 +417,7 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) GetRendererForPackStackWi
 		_minecraftBlockRenderer._packRendererCache = make(map[string]*MinecraftBlockRenderer)
 	}
 	if cached, exists := _minecraftBlockRenderer._packRendererCache[cacheKey]; exists {
+		_minecraftBlockRenderer.touchPackRendererLocked(cached)
 		_minecraftBlockRenderer._packRendererCacheMu.Unlock()
 		return cached
 	}
@@ -401,6 +449,8 @@ func (_minecraftBlockRenderer *MinecraftBlockRenderer) GetRendererForPackStackWi
 		// A reload during the build swapped the registry; don't publish a renderer built from the old one.
 		if build.renderer != nil && generation == _minecraftBlockRenderer._packRendererGeneration {
 			_minecraftBlockRenderer._packRendererCache[cacheKey] = build.renderer
+			_minecraftBlockRenderer.touchPackRendererLocked(build.renderer)
+			_minecraftBlockRenderer.evictPackRenderersLocked()
 		}
 		_minecraftBlockRenderer._packRendererCacheMu.Unlock()
 		close(build.done)
