@@ -1,8 +1,9 @@
 package data
 
 import (
-	nbt "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/NBT"
 	"testing"
+
+	nbt "github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/NBT"
 )
 
 func TestUnsupportedCatharsisSelectFallsBackToFirstCase(t *testing.T) {

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/data"
 )
 
 type expectedChestFace struct {

@@ -1,7 +1,6 @@
 package minecraftblockrenderer
 
 import (
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/assets"
 	"image"
 	"image/color"
 	"image/png"
@@ -10,6 +9,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/assets"
 )
 
 type skycryptItem struct {

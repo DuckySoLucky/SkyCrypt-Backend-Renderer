@@ -1,9 +1,10 @@
 package data
 
 import (
-	nbt "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/NBT"
 	"image/color"
 	"testing"
+
+	nbt "github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/NBT"
 )
 
 type fixtureItem struct {

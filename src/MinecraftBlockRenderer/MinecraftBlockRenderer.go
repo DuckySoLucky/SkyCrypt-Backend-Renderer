@@ -2,17 +2,18 @@ package minecraftblockrenderer
 
 import (
 	"fmt"
-	nbt "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/NBT"
-	texturepacks "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/TexturePacks"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/global"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/imagecache"
 	"image"
 	"image/color"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+
+	nbt "github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/NBT"
+	texturepacks "github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/TexturePacks"
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/data"
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/global"
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/imagecache"
 )
 
 // ColorMap maps common color names to RGB values (case-insensitive keys expected).

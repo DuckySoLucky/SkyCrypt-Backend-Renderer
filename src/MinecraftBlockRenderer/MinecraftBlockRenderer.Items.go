@@ -18,11 +18,11 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src"
-	nbt "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/NBT"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/global"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/imagecache"
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src"
+	nbt "github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/NBT"
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/data"
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/global"
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/imagecache"
 
 	"golang.org/x/image/draw"
 )

@@ -1,11 +1,12 @@
 package minecraftblockrenderer
 
 import (
-	nbt "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/NBT"
-	texturepacks "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/TexturePacks"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
 	"strings"
 	"testing"
+
+	nbt "github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/NBT"
+	texturepacks "github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/TexturePacks"
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/data"
 )
 
 func TestHPlusPlayerHeadSelectorRendersPackModel(t *testing.T) {

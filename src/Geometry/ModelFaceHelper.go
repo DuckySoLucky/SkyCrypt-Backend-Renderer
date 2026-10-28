@@ -1,8 +1,8 @@
 package geometry
 
 import (
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src"
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/data"
 )
 
 var FaceVertexIndices = map[data.BlockFaceDirection][4]int{

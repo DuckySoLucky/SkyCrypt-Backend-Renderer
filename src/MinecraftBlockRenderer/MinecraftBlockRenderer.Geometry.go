@@ -2,12 +2,13 @@ package minecraftblockrenderer
 
 import (
 	"fmt"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src"
-	geometry "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/Geometry"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/global"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/model"
 	"image"
+
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src"
+	geometry "github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/Geometry"
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/data"
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/global"
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/model"
 )
 
 func (_minecraftBlockRenderer *MinecraftBlockRenderer) BuildTriangles(blockMModel *data.BlockModelInstance, transform model.Matrix4, applyInventoryLighting bool, blockName string) []VisibleTriangle {

@@ -3,9 +3,6 @@ package minecraftblockrenderer
 import (
 	"encoding/base64"
 	"fmt"
-	texturepacks "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/TexturePacks"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/assets"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
 	"image"
 	"image/draw"
 	"io"
@@ -14,6 +11,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	texturepacks "github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/TexturePacks"
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/assets"
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/data"
 )
 
 type BlockFaceRenderOptions struct {

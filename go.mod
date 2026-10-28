@@ -1,4 +1,4 @@
-module github.com/DuckySoLucky/SkyCrypt-Backend-Renderer
+module github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer
 
 go 1.26.1
 

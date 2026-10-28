@@ -1,13 +1,14 @@
 package data
 
 import (
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/assets"
 	"image"
 	"image/color"
 	"image/png"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/assets"
 )
 
 func TestAnimatedTextureUsesFirstFrameDimensions(t *testing.T) {

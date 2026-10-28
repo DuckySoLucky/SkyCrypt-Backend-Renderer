@@ -1,13 +1,14 @@
 package minecraftblockrenderer
 
 import (
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/model"
 	"image"
 	"image/color"
 	"math"
 	"sort"
+
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src"
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/data"
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/model"
 )
 
 var DefaultGuiTransform = &data.TransformDefinition{

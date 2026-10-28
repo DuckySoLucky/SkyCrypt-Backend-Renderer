@@ -3,9 +3,6 @@ package data
 import (
 	"bytes"
 	"fmt"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/assets"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/global"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/imagecache"
 	"image"
 	"image/color"
 	"io"
@@ -13,6 +10,10 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/assets"
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/global"
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/imagecache"
 )
 
 type TextureRepository struct {

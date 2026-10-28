@@ -15,11 +15,11 @@ import (
 	"sync"
 	"testing"
 
-	mbr "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/MinecraftBlockRenderer"
-	nbt "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/NBT"
-	texturepacks "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/TexturePacks"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/global"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/imagecache"
+	mbr "github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/MinecraftBlockRenderer"
+	nbt "github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/NBT"
+	texturepacks "github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/TexturePacks"
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/global"
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/imagecache"
 )
 
 func TestNewRendererRequiresPackIDs(t *testing.T) {

@@ -1,9 +1,10 @@
 package model
 
 import (
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
 	"math"
 	"testing"
+
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/data"
 )
 
 func TestTransformAppliesTranslationLikeSystemNumerics(t *testing.T) {

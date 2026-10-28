@@ -2,10 +2,11 @@ package minecraftblockrenderer
 
 import (
 	"fmt"
-	nbt "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/NBT"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
 	"image"
 	"strings"
+
+	nbt "github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/NBT"
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/data"
 )
 
 func (renderer *MinecraftBlockRenderer) RenderItemObject(item any, options *BlockRenderOptions) (*image.RGBA, error) {

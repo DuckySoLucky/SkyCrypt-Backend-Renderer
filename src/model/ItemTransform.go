@@ -3,7 +3,7 @@ package model
 import (
 	"math"
 
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/data"
 )
 
 type Matrix4 [4][4]float64

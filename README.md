@@ -16,7 +16,7 @@ Rendered images are written to a cache directory and reused, so each item is dra
 ## Installation
 
 ```bash
-go get github.com/DuckySoLucky/SkyCrypt-Backend-Renderer
+go get github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer
 ```
 
 ## What it needs on disk
@@ -50,7 +50,7 @@ import (
 	"fmt"
 	"log"
 
-	renderer "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer"
+	renderer "github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer"
 )
 
 func main() {
@@ -101,7 +101,7 @@ fmt.Println(rendered.Path)
 ```
 
 The input is read loosely, so the decoded NBT of an inventory (for example a
-[SkyCrypt-Types](https://github.com/DuckySoLucky/SkyCrypt-Types) `Item` turned into a map) works as is. The fields it
+[SkyCrypt-Types](https://github.com/SkyCryptWebsite/SkyCrypt-Types) `Item` turned into a map) works as is. The fields it
 looks at:
 
 | Field | Meaning |

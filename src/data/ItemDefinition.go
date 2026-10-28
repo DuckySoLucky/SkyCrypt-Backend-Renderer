@@ -3,7 +3,7 @@ package data
 import (
 	"fmt"
 
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/global"
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/global"
 )
 
 func ParseItemDefinitionJSON(data []byte) (map[string]interface{}, error) {

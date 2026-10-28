@@ -1,11 +1,12 @@
 package src
 
 import (
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
 	"image"
 	"image/color"
 	"math"
 	"sort"
+
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/data"
 )
 
 // Face represents the 6 faces of a cube

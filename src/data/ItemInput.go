@@ -3,12 +3,13 @@ package data
 import (
 	"errors"
 	"fmt"
-	nbt "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/NBT"
 	"image/color"
 	"math"
 	"reflect"
 	"strconv"
 	"strings"
+
+	nbt "github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/NBT"
 )
 
 type NormalizedItemInput struct {

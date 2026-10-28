@@ -2,9 +2,10 @@ package data
 
 import (
 	"encoding/json"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/assets"
 	"os"
 	"strings"
+
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/assets"
 )
 
 type BlockRegistry struct {

@@ -5,12 +5,13 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/global"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/models"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/global"
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/models"
 )
 
 const versionManifestURL = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"

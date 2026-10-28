@@ -1,13 +1,14 @@
 package minecraftblockrenderer
 
 import (
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
 	"image"
 	"image/color"
 	"math"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/data"
 )
 
 func TestRenderStoneProducesOpaquePixels(t *testing.T) {

@@ -1,11 +1,12 @@
 package data
 
 import (
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/assets"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/global"
 	"image/color"
 	"os"
 	"strings"
+
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/assets"
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/global"
 )
 
 type ItemInfo struct {

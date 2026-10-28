@@ -1,9 +1,10 @@
 package minecraftblockrenderer
 
 import (
-	nbt "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/NBT"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
 	"testing"
+
+	nbt "github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/NBT"
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/data"
 )
 
 func TestRenderItemObjectWithResourceIdMatchesDirectRender(t *testing.T) {

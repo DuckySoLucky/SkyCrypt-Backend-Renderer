@@ -5,10 +5,6 @@ import (
 	"encoding/base32"
 	"encoding/hex"
 	"fmt"
-	nbt "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/NBT"
-	texturepacks "github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/TexturePacks"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/assets"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/data"
 	"image"
 	"image/color"
 	"image/draw"
@@ -19,6 +15,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	nbt "github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/NBT"
+	texturepacks "github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/TexturePacks"
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/assets"
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/data"
 )
 
 var VanillaPackId = "vanilla"

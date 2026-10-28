@@ -1,8 +1,9 @@
 package texturepacks
 
 import (
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/assets"
 	"time"
+
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/assets"
 )
 
 type OverlayNamespaceProvider struct {

@@ -2,10 +2,11 @@ package data
 
 import (
 	"fmt"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/assets"
-	"github.com/DuckySoLucky/SkyCrypt-Backend-Renderer/src/global"
 	"os"
 	"sync"
+
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/assets"
+	"github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer/src/global"
 )
 
 type BlockModelResolver struct {
