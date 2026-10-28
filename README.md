@@ -1,6 +1,6 @@
-# SkyCrypt-Backend-Renderer
+# SkyCrypt-Assets-Renderer
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/DuckySoLucky/SkyCrypt-Backend-Renderer.svg)](https://pkg.go.dev/github.com/DuckySoLucky/SkyCrypt-Backend-Renderer)
+[![Go Reference](https://pkg.go.dev/badge/github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer.svg)](https://pkg.go.dev/github.com/SkyCryptWebsite/SkyCrypt-Assets-Renderer)
 
 Renders Minecraft and Hypixel SkyBlock items to WebP images, the way the game shows them in an inventory, with the
 vanilla textures or a stack of resource packs (Hypixel Plus, FurSky Reborn, ...). It renders:
